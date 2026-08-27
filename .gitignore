@@ -21,3 +21,7 @@ frontend/tsconfig.tsbuildinfo
 backend/app/ml/train/training_data.npz
 backend/scripts/output/
 backend/data/
+
+# Design reference images — kept local. The turbo diagram is watermarked stock art,
+# so it is deliberately not redistributed in this repo. See README note.
+frontend/public/reference/

@@ -16,7 +16,10 @@ import { MissionReportView } from "@/components/dashboard/MissionReportView";
 import { ControlDeck } from "@/components/dashboard/ControlDeck";
 
 const EngineCutaway3D = dynamic(
-  () => import("@/components/dashboard/EngineCutaway3D").then((m) => m.EngineCutaway3D),
+  () =>
+    import("@/components/dashboard/engine3d/EngineCutaway3D").then(
+      (m) => m.EngineCutaway3D
+    ),
   {
     ssr: false,
     loading: () => (
