@@ -48,12 +48,13 @@ class TurboModel:
         altitude_m: float,
         fault_state: FaultState,
         inlet_pressure_kpa: float | None = None,
+        ambient_temperature_c: float | None = None,
     ) -> TurboOutputs:
         """`inlet_pressure_kpa` is the pressure at the compressor inlet — ambient minus
         whatever the air filter is costing. The filter sits *upstream* of the compressor,
         so a clog lowers what the turbo has to work with and boost droops accordingly."""
         p = self.p
-        atm = atmosphere(altitude_m)
+        atm = atmosphere(altitude_m, ambient_temperature_c)
         p_amb_kpa = atm.pressure_kpa
         p_inlet_kpa = p_amb_kpa if inlet_pressure_kpa is None else max(
             5.0, inlet_pressure_kpa

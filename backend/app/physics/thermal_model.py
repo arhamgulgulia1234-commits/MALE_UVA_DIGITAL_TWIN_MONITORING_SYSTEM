@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.core.engine_params import PARAMS, EngineParams
-from app.physics.environment import atmosphere, density_ratio
+from app.physics.environment import atmosphere, density_ratio, isa_deviation_k
 from app.physics.fault_models import FaultState
 
 
@@ -52,9 +52,10 @@ class ThermalModel:
         airspeed_ms: float,
         fault_state: FaultState,
         cooling_flap_command: float = 1.0,
+        ambient_temperature_c: float | None = None,
     ) -> ThermalOutputs:
         p = self.p
-        atm = atmosphere(altitude_m)
+        atm = atmosphere(altitude_m, ambient_temperature_c)
         t_ambient_c = atm.temperature_c
 
         # ---- cylinder head ----------------------------------------------------
@@ -62,7 +63,14 @@ class ThermalModel:
         speed_factor = (
             max(0.15, airspeed_ms) / p.cooling_airspeed_ref_ms
         ) ** p.cooling_airspeed_exponent
-        density_factor = density_ratio(altitude_m) ** 0.5
+        density_factor = density_ratio(altitude_m, ambient_temperature_c) ** 0.5
+        # A hot day hurts cooling twice over: the driving temperature difference
+        # (T_cht - T_ambient) shrinks on its own, and the cooling air itself is thinner
+        # and carries less heat per unit volume. The second effect is this term.
+        hot_day_k = isa_deviation_k(altitude_m, ambient_temperature_c)
+        hot_day_factor = max(
+            0.45, 1.0 - p.cooling_hot_weather_loss_per_k * max(0.0, hot_day_k)
+        )
         # Cooling flaps are scheduled off power demand: they close as the engine is
         # throttled back, which is what stops CHT collapsing during a descent.
         flap_factor = p.cooling_flap_min_fraction + (
@@ -73,6 +81,7 @@ class ThermalModel:
             * speed_factor
             * density_factor
             * flap_factor
+            * hot_day_factor
             * (1.0 - p.f_cooling_effectiveness_loss * fault_state.cooling_degradation)
         )
         conductance = max(4.0, conductance)

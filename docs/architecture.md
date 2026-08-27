@@ -1,6 +1,6 @@
 # Architecture
 
-## Data flow (Phase 2 — physics simulation + digital twin + PHM)
+## Data flow (Phase 3 — physics + twin + PHM + persistence, replay and ingestion)
 
 ```
                         ┌──────────────────────────────────────────────────────┐
@@ -71,6 +71,60 @@
                     ▼         all dashboard components read from the store
 ```
 
+### Phase 3 additions to the flow
+
+```
+  ingestion boundary            persistence                 replay
+  ────────────────────          ───────────                 ──────
+  EngineDataAdapter             mission session active?     GET /control/missions
+   ├─ SimulatedAdapter  ──┐       └─ repository.save_frame   POST /control/replay/start
+   └─ CANBusAdapter (stub)│          (batched, 50 frames)          │
+                          │       fault inject/clear                │ stored frames
+                          ▼          └─ save_fault_event            ▼
+                    RawEngineData                          ReplayEngine
+                          │                                  │ same broadcast path,
+                          ▼                                  │ is_replay = true
+                  (physics -> twin -> PHM)  ────────────────►├──► /ws/telemetry
+                          │                                  │
+                          │  sensor faults applied HERE      │
+                          │  (after physics, after twin)     │
+                          ▼                                  │
+                   TelemetryFrame ─────────────────────────► ┘
+                          │
+                          ├─► efficiency_analysis  (BSFC + trend)
+                          ├─► maintenance_advisor  (what to actually do)
+                          └─► mission_report       (on mission end)
+```
+
+### Where sensor faults enter, and why it matters
+
+Every Phase 2 fault corrupts the **engine**. A Phase 3 sensor fault corrupts the
+**reading**. That difference dictates its position in the pipeline:
+
+```
+physics computes true state
+    -> digital twin computes its healthy prediction
+        -> SENSOR FAULT APPLIED to the reported values only
+            -> residual = reported - twin     <- still shows an anomaly
+                -> anomaly detector / classifier
+```
+
+Because the corruption lands after the twin, a drifting EGT probe produces a residual that
+looks superficially like a real combustion problem. What separates them is *correlation
+structure*: a real mechanism moves every physically-linked channel together, while a
+sensor fault moves exactly one and leaves its physical neighbours where the twin predicted.
+`app/ml/fault_classifier.py` checks that directly via `PHYSICAL_CHANNEL_GROUPS`.
+
+One subtlety worth recording: `egt_mean_c` and `egt_spread_c` are deliberately *not*
+treated as corroborating each other. They are derived from the same thermocouples, so one
+bad probe moves both — they are mathematically coupled, not physically coupled, and
+counting one as evidence for the other would let a single failed sensor masquerade as a
+real fault.
+
+The uncorrupted state is kept in `DiagnosticSnapshot.true_state` and exposed only on
+`GET /twin/diagnosis`, never on the telemetry stream — the dashboard has to infer
+sensor-vs-physical the way a real ground station would, not be handed the answer.
+
 ### Why the residual layer exists
 
 A raw threshold on oil pressure fires every time the engine throttles back for loiter.
@@ -136,11 +190,26 @@ running the demo at 20× would make the PHM layer appear twenty times slower to 
 | `app/api/control.py` | `/control/*` — fault inject/clear, throttle, time-scale, phase |
 | `app/api/twin_diagnostics.py` | `/twin/diagnosis` — residuals and classifier output |
 | `app/api/health.py` | `/health` liveness |
-| `scripts/validate_physics.py` | Headless mission + fault, writes validation plots |
+| `scripts/validate_physics.py` | Headless mission + fault, and the throttle-transient scenario; writes validation plots |
+| `app/core/security.py` | Bearer-token guard for `/control/*` and the telemetry socket |
+| `app/core/engine_params.py` | Every tunable constant, including all Phase 3 additions |
+| `app/db/models.py` | SQLAlchemy tables: missions, telemetry_frames (JSON), fault_events |
+| `app/db/session.py` | SQLite engine, WAL mode, `init_db()` on startup |
+| `app/db/repository.py` | The only module that touches the database; batches frame writes |
+| `app/physics/electrical_model.py` | Alternator output vs RPM, battery terminal voltage under load |
+| `app/physics/sensor_fault_model.py` | Sensor faults — corrupt the reading, not the engine |
+| `app/ml/efficiency_analysis.py` | BSFC and its rolling trend |
+| `app/ml/maintenance_advisor.py` | Rule-based, auditable maintenance recommendations |
+| `app/ml/mission_report.py` | Post-mission debrief built from stored frames |
+| `app/sim/replay_engine.py` | Streams stored missions over the live contract |
+| `app/ingestion/adapter_interface.py` | `RawEngineData` + `EngineDataAdapter`; simulated impl, CAN stub |
+| `app/api/twin_diagnostics.py` | Residuals, twin values, classifier verdict, ground truth |
 
 ## Frontend component responsibilities
 
-Unchanged from Phase 1 — no frontend file was modified in Phase 2.
+Phase 2 modified no frontend file at all. Phase 3 **extended** the schema with optional
+fields only and added new components; the existing panels were not restyled, and they
+render unchanged against the extended contract because every new field is optional.
 
 | Component | Responsibility |
 |---|---|
@@ -154,7 +223,12 @@ Unchanged from Phase 1 — no frontend file was modified in Phase 2.
 | `components/dashboard/TelemetryStrip` | 60 s multi-line time series |
 | `components/dashboard/VibrationSpectrum` | Per-cylinder vibration RMS bars |
 | `components/dashboard/FaultAlertFeed` | Colour-coded fault log |
-| `components/dashboard/ControlDeck` | Throttle, time-scale, phase jump, fault injection |
+| `components/dashboard/ControlDeck` | Throttle, time-scale, phase jump, fault injection, sensor faults, scenarios, record/replay |
+| `components/dashboard/BatteryAlternatorTile` | Bus voltage vs alternator output (Phase 3) |
+| `components/dashboard/EfficiencyTrendChart` | BSFC and COV(IMEP) over the mission (Phase 3) |
+| `components/dashboard/MaintenanceAdvisoryPanel` | Actionable advisories, severity-ordered (Phase 3) |
+| `components/dashboard/MissionReplayControls` | Record/stop, mission picker, replay speed (Phase 3) |
+| `components/dashboard/MissionReportView` | Post-mission debrief modal (Phase 3) |
 | `lib/types.ts` | `TelemetryFrame` contract (mirrored by the backend) |
 | `lib/websocket.ts` | Reconnecting WebSocket client |
 | `lib/store.ts` | Zustand store: 600-frame rolling buffer + control actions |

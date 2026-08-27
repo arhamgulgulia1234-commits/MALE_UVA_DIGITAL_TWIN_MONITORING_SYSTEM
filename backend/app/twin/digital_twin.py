@@ -49,9 +49,21 @@ class DigitalTwin:
         throttle: float,
         altitude_m: float,
         airspeed_ms: float,
+        ambient_temperature_c: float | None = None,
     ) -> None:
-        """Step the reference engine with the same commands, always fault-free."""
-        self.plant.substep(dt, throttle, altitude_m, airspeed_ms, self.healthy)
+        """Step the reference engine with the same commands, always fault-free.
+
+        The twin sees the same weather too — a hot day is an operating condition, not a
+        fault, so the healthy reference must account for it or every hot afternoon would
+        register as engine degradation."""
+        self.plant.substep(
+            dt,
+            throttle,
+            altitude_m,
+            airspeed_ms,
+            self.healthy,
+            ambient_temperature_c=ambient_temperature_c,
+        )
 
     def compare(self, real_state: PlantState) -> TwinComparison:
         twin_state = self.plant.finalise_tick()

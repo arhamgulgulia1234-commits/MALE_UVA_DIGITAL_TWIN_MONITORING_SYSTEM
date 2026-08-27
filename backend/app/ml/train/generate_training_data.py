@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 
 from app.physics.fault_models import FAULT_TYPES
+from app.physics.sensor_fault_model import SENSOR_FAULT_TYPES
 from app.sim.mission_profiles import PHASE_ORDER
 from app.sim.simulation_loop import SimulationLoop
 
@@ -46,7 +47,14 @@ def run_episode(
     fault_type: str,
     rng: random.Random,
     time_scale: float = 5.0,
+    is_sensor_fault: bool = False,
 ) -> tuple[list[list[float]], list[str]]:
+    """Fly one episode: healthy for a while, then one fault ramped in.
+
+    `is_sensor_fault` routes the injection through SensorFaultState instead of
+    FaultState. Both produce residuals against the twin, but only the physical ones
+    actually degrade the engine — teaching the classifier that difference is the entire
+    point of including them here as their own labelled classes."""
     sim = SimulationLoop()
     sim.set_time_scale(time_scale)
 
@@ -55,6 +63,9 @@ def run_episode(
     sim.jump_phase(rng.choice(PHASE_ORDER))
     if rng.random() < 0.5:
         sim.set_throttle(rng.uniform(0.35, 1.0))
+    # Vary the weather too, so a hot day is not mistaken for a cooling fault.
+    if rng.random() < 0.25:
+        sim.set_ambient_temperature(rng.uniform(-20.0, 48.0))
 
     features: list[list[float]] = []
     labels: list[str] = []
@@ -69,15 +80,19 @@ def run_episode(
 
     severity = rng.uniform(0.35, 1.0)
     ramp = rng.uniform(5.0, 45.0)
-    sim.inject_fault(fault_type, severity, ramp)
+    if is_sensor_fault:
+        sim.inject_sensor_fault(fault_type, severity, ramp)
+        severity_of = sim.sensor_faults.severity
+    else:
+        sim.inject_fault(fault_type, severity, ramp)
+        severity_of = sim.faults.severity
 
     for _ in range(FAULT_SETTLE_TICKS):
         sim.tick(0.1)
 
     for _ in range(FAULT_SAMPLE_TICKS):
         sim.tick(0.1)
-        current = sim.faults.severity(fault_type)
-        if current < AMBIGUOUS_BELOW:
+        if severity_of(fault_type) < AMBIGUOUS_BELOW:
             continue
         features.append(sim.residuals.feature_vector())
         labels.append(fault_type)
@@ -100,11 +115,18 @@ def main() -> None:
 
     all_episodes: list[int] = []
 
-    total = args.episodes * len(FAULT_TYPES)
+    # Physical faults and sensor faults are both labelled classes. The classifier has to
+    # learn to separate "the engine is broken" from "the instrument is broken", and it
+    # cannot do that if it has only ever seen the former.
+    catalogue = [(ft, False) for ft in FAULT_TYPES] + [
+        (ft, True) for ft in SENSOR_FAULT_TYPES
+    ]
+
+    total = args.episodes * len(catalogue)
     done = 0
-    for fault_type in FAULT_TYPES:
+    for fault_type, is_sensor in catalogue:
         for _ in range(args.episodes):
-            feats, labs = run_episode(fault_type, rng, args.time_scale)
+            feats, labs = run_episode(fault_type, rng, args.time_scale, is_sensor)
             all_features.extend(feats)
             all_labels.extend(labs)
             # Tag every sample with its episode so training can hold out whole episodes.
@@ -112,7 +134,8 @@ def main() -> None:
             # them randomly leaks the test set into training and reports ~100% accuracy.
             all_episodes.extend([done] * len(feats))
             done += 1
-            print(f"  [{done:3d}/{total}] {fault_type:22s} "
+            kind = "sensor" if is_sensor else "physical"
+            print(f"  [{done:3d}/{total}] {fault_type:30s} {kind:8s} "
                   f"samples={len(feats):4d} total={len(all_labels)}", flush=True)
 
     x = np.asarray(all_features, dtype=np.float32)

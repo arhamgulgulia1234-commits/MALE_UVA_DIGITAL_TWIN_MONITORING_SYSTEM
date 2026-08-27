@@ -161,6 +161,56 @@ class EngineParams:
     f_turbo_pr_loss: float = 0.55                # fractional PR_max loss
     f_turbo_vib_imbalance: float = 0.18
 
+    # ==== Phase 3 additions ====================================================
+
+    # ---- electrical (electrical_model.py) -------------------------------------
+    battery_nominal_v: float = 12.6          # resting terminal voltage, charged pack
+    alternator_regulated_v: float = 14.2     # regulator setpoint
+    alternator_cutin_rpm: float = 600.0      # below this the alternator makes nothing
+    alternator_knee_rpm: float = 900.0       # tanh knee -> saturated by ~1500 RPM
+    battery_internal_ohm: float = 0.022
+    battery_tau_s: float = 2.5               # terminal-voltage lag (capacitance analogy)
+    electrical_load_a: float = 28.0          # avionics + payload draw
+    f_alternator_output_loss: float = 0.30   # regulated output lost at severity 1
+    f_battery_resistance_growth: float = 6.0 # internal resistance multiplier at severity 1
+
+    # ---- injection timing (engine_model.py) -----------------------------------
+    injection_timing_nominal_deg: float = 22.0   # crank degrees before TDC
+    #: Combustion efficiency falls off either side of optimum timing.
+    injection_timing_sensitivity: float = 0.011  # eta_comb loss per degree of error
+    injection_timing_egt_per_deg: float = 7.5    # EGT rise per degree retarded
+    f_injection_timing_drift_deg: float = 11.0   # degrees of drift at severity 1
+
+    # ---- combustion stability (engine_model.py) -------------------------------
+    #: Baseline cycle-to-cycle IMEP scatter of a healthy engine. Real engines sit around
+    #: 1-3% COV; above ~10% the engine is audibly rough and misfire is imminent.
+    imep_cov_baseline: float = 0.018
+    #: Extra scatter contributed by each destabilising fault, at severity 1.
+    imep_cov_misfire_gain: float = 0.34
+    imep_cov_spark_gain: float = 0.16
+    imep_cov_timing_gain: float = 0.12
+    imep_cov_injector_gain: float = 0.10
+    #: Rolling-window length (samples) for the COV statistic.
+    imep_cov_window: int = 90
+    #: Baseline tracker for detrending. Fast enough to follow a throttle change,
+    #: slow enough to leave cycle-to-cycle scatter in the signal.
+    imep_baseline_tau_s: float = 0.30
+    #: Fractional rate of change of the IMEP baseline (per second) above which
+    #: the engine is manoeuvring rather than holding steady, and COV is held.
+    imep_transient_rate_threshold: float = 0.30
+
+    # ---- ambient temperature (environment.py / thermal_model.py) ---------------
+    #: Density and cooling both degrade when the air is hotter than ISA predicts.
+    hot_weather_ambient_c: float = 48.0
+    #: Cooling conductance lost per Kelvin above the ISA temperature for that altitude.
+    cooling_hot_weather_loss_per_k: float = 0.0055
+
+    # ---- sensor faults (sensor_fault_model.py) --------------------------------
+    sensor_egt_drift_max_c: float = 165.0        # probe offset at severity 1
+    sensor_oil_pressure_noise_kpa: float = 55.0  # excess sigma at severity 1
+    sensor_oil_pressure_dropout_prob: float = 0.10
+    sensor_rpm_stuck_threshold: float = 0.5      # above this the reading freezes
+
 
 PARAMS = EngineParams()
 """Default engine. Models accept an EngineParams so alternates can be swapped in."""

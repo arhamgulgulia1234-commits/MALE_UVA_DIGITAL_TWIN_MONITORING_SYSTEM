@@ -24,19 +24,25 @@ from app.core.config import settings
 from app.core.engine_params import PARAMS, EngineParams
 from app.core.models import (
     ActiveFault,
+    ClassifierExplanation,
     CylinderReading,
     HealthState,
+    MaintenanceAdvisory,
     MissionReliability,
     SubsystemScores,
     TelemetryFrame,
 )
 from app.ml.anomaly_detector import AnomalyDetector, AnomalyReport
+from app.ml.efficiency_analysis import EfficiencyAnalyser
 from app.ml.fault_classifier import Diagnosis, FaultClassifier
+from app.ml.maintenance_advisor import MaintenanceAdvisor
 from app.ml.mission_reliability import MissionReliabilityModel
 from app.ml.rul_predictor import RULPredictor
+from app.physics.environment import atmosphere
 from app.physics.fault_models import FaultState
 from app.physics.plant import EnginePlant
-from app.sim.mission_profiles import MissionProfile
+from app.physics.sensor_fault_model import SensorFaultModel, SensorFaultState
+from app.sim.mission_profiles import MissionProfile, apply_scenario
 from app.twin.digital_twin import DigitalTwin
 from app.twin.residual_analysis import ResidualMonitor
 
@@ -63,6 +69,17 @@ class DiagnosticSnapshot:
     rul_model: str = "stable"
     twin_channels: dict[str, float] = field(default_factory=dict)
     real_channels: dict[str, float] = field(default_factory=dict)
+    # ---- Phase 3 ---------------------------------------------------------
+    predicted_source: str = "uncertain"
+    source_rationale: str = ""
+    classifier_explanation: list[dict] = field(default_factory=list)
+    #: The uncorrupted physical state, before sensor faults were applied. Diagnostic
+    #: only — it is what lets the validation script prove a sensor fault left the engine
+    #: untouched, and it is deliberately never put on the telemetry stream.
+    true_state: dict[str, float] = field(default_factory=dict)
+    sensor_fault_truth: dict[str, float] = field(default_factory=dict)
+    bsfc_g_per_kwh: float | None = None
+    efficiency_trend: str = "stable"
 
 
 class SimulationLoop:
@@ -84,6 +101,19 @@ class SimulationLoop:
         self.rul = RULPredictor()
         self.reliability = MissionReliabilityModel()
         self.classifier = FaultClassifier()
+        self.classifier.set_feature_names(self.residuals.feature_names())
+
+        # ---- Phase 3 --------------------------------------------------------
+        self.sensor_faults = SensorFaultState()
+        self.sensor_model = SensorFaultModel(params)
+        self.efficiency = EfficiencyAnalyser(
+            fuel_density_kg_per_l=params.fuel_density_kg_per_l
+        )
+        self.advisor = MaintenanceAdvisor()
+        #: None means "use the ISA temperature for the current altitude".
+        self.ambient_temperature_c: float | None = None
+        self.active_mission_id: int | None = None
+        self._true_state_snapshot: dict[str, float] = {}
 
         self.sim_time_s: float = 0.0
         self.time_scale: float = 1.0
@@ -130,6 +160,31 @@ class SimulationLoop:
     def active_faults(self) -> dict[str, float]:
         return self.faults.active()
 
+    # ---- Phase 3 control surface --------------------------------------------
+
+    def inject_sensor_fault(
+        self, fault_type: str, severity: float, ramp_seconds: float
+    ) -> None:
+        self.sensor_faults.inject(
+            fault_type,
+            severity,
+            ramp_seconds,
+            now=time.time(),
+            n_cylinders=self.p.n_cylinders,
+        )
+
+    def clear_sensor_fault(self, fault_type: str, ramp_seconds: float = 5.0) -> None:
+        self.sensor_faults.clear(fault_type, ramp_seconds)
+
+    def set_ambient_temperature(self, celsius: float | None) -> None:
+        """None restores the ISA temperature for the current altitude."""
+        self.ambient_temperature_c = celsius
+
+    def apply_scenario(self, scenario: str) -> dict:
+        """Apply a named environmental scenario from the mission profile table."""
+        applied = apply_scenario(self, scenario)
+        return applied
+
     # ---- main tick -----------------------------------------------------------
 
     def tick(self, wall_dt_s: float) -> TelemetryFrame:
@@ -139,6 +194,7 @@ class SimulationLoop:
 
         for _ in range(n_substeps):
             self.faults.step(dt)
+            self.sensor_faults.step(dt)
             self.mission.step(dt)
             self.sim_time_s += dt
 
@@ -150,12 +206,27 @@ class SimulationLoop:
             self.throttle = throttle
             altitude = self.mission.altitude_m
             airspeed = self.mission.airspeed_ms
+            ambient = self.ambient_temperature_c
 
-            self.plant.substep(dt, throttle, altitude, airspeed, self.faults)
-            self.twin.substep(dt, throttle, altitude, airspeed)
+            self.plant.substep(
+                dt, throttle, altitude, airspeed, self.faults, ambient_temperature_c=ambient
+            )
+            self.twin.substep(
+                dt, throttle, altitude, airspeed, ambient_temperature_c=ambient
+            )
 
         # ---- once-per-tick PHM chain ----------------------------------------
         real_state = self.plant.finalise_tick()
+
+        # Phase 3: sensor faults corrupt the *reported* values, and they are applied here
+        # — after the physics has produced the true state and before the residual is
+        # taken. The twin is untouched, so the residual still shows an anomaly even
+        # though the engine is fine. That is exactly the situation the disambiguation
+        # logic in the classifier exists to resolve.
+        self._true_state_snapshot = real_state.channels()
+        if self.sensor_faults.any_active():
+            self.sensor_model.apply(real_state, self.sensor_faults)
+
         comparison = self.twin.compare(real_state)
         report = self.residuals.update(comparison.residuals, dt_s=sim_dt_total)
         anomaly: AnomalyReport = self.anomaly.update(report, dt_s=sim_dt_total)
@@ -166,10 +237,30 @@ class SimulationLoop:
             overall_health=anomaly.overall_health,
         )
 
-        diagnosis: Diagnosis = self.classifier.predict(self.residuals.feature_vector())
+        residual_z = {c: report.z(c) for c in report.stats}
+        diagnosis: Diagnosis = self.classifier.predict(
+            self.residuals.feature_vector(), residual_z=residual_z
+        )
+
+        efficiency = self.efficiency.update(
+            fuel_flow_lph=real_state.fuel_flow_lph,
+            power_kw=real_state.power_brake_kw,
+            dt_s=sim_dt_total,
+        )
+
+        advisories = self.advisor.evaluate(
+            health_indicators=anomaly.health_indicators,
+            rul_minutes=rul_estimate.minutes,
+            rul_subsystem=rul_estimate.subsystem,
+            active_faults=self.faults.active(),
+            efficiency_trend=efficiency.trend,
+            combustion_instability_pct=real_state.combustion_instability_pct,
+            predicted_source=diagnosis.predicted_source,
+            battery_voltage_v=real_state.battery_voltage_v,
+        )
 
         self.diagnostics = DiagnosticSnapshot(
-            residual_z={c: report.z(c) for c in report.stats},
+            residual_z=residual_z,
             residual_mean={c: report.mean(c) for c in report.stats},
             flagged_channels=anomaly.flagged_channels,
             anomaly_scores=anomaly.anomaly_scores,
@@ -180,6 +271,15 @@ class SimulationLoop:
             rul_model=rul_estimate.model,
             twin_channels=comparison.twin.channels(),
             real_channels=comparison.real.channels(),
+            predicted_source=diagnosis.predicted_source,
+            source_rationale=diagnosis.source_rationale,
+            classifier_explanation=diagnosis.explanation_dicts(),
+            # Ground truth for validation only — never sent to the frontend, which must
+            # infer sensor-vs-physical the same way a real ground station would.
+            true_state=self._true_state_snapshot,
+            sensor_fault_truth=self.sensor_faults.snapshot(),
+            bsfc_g_per_kwh=efficiency.bsfc_g_per_kwh,
+            efficiency_trend=efficiency.trend,
         )
 
         # ---- assemble the frame (schema identical to Phase 1) ----------------
@@ -192,13 +292,36 @@ class SimulationLoop:
             for i in range(len(real_state.egt_c))
         ]
 
+        # Ground-truth fault state. The ControlDeck drives its per-fault "tap to clear"
+        # toggle from this list, so it must reflect what is actually injected rather than
+        # what the classifier believes — a misclassification must not make the control
+        # surface lie about what is running.
         active = [
             ActiveFault(
-                type=ft,  # type: ignore[arg-type]
+                type=ft,
                 severity=round(sev, 4),
                 started_at=self.faults.started_at.get(ft, time.time()),
+                predicted_source=diagnosis.predicted_source,
+                classifier_explanation=[
+                    ClassifierExplanation(**e) for e in diagnosis.explanation_dicts()
+                ]
+                or None,
+                is_sensor_fault=False,
             )
             for ft, sev in self.faults.active().items()
+        ]
+        # Sensor faults appear in the same list, flagged, so the alert feed shows them
+        # without needing a second channel.
+        active += [
+            ActiveFault(
+                type=ft,
+                severity=round(sev, 4),
+                started_at=self.sensor_faults.started_at.get(ft, time.time()),
+                predicted_source="sensor_fault",
+                classifier_explanation=None,
+                is_sensor_fault=True,
+            )
+            for ft, sev in self.sensor_faults.active().items()
         ]
 
         frame = TelemetryFrame(
@@ -228,6 +351,27 @@ class SimulationLoop:
                 recommendation=reliability.recommendation,  # type: ignore[arg-type]
             ),
             active_faults=active,
+            # ---- Phase 3 fields ------------------------------------------
+            battery_voltage_v=round(real_state.battery_voltage_v, 2),
+            alternator_output_v=round(real_state.alternator_output_v, 2),
+            injection_timing_deg=round(real_state.injection_timing_deg, 2),
+            combustion_instability_pct=round(real_state.combustion_instability_pct, 2),
+            ambient_temperature_c=round(
+                self.ambient_temperature_c
+                if self.ambient_temperature_c is not None
+                else atmosphere(self.mission.altitude_m).temperature_c,
+                1,
+            ),
+            bsfc_g_per_kwh=(
+                round(efficiency.bsfc_g_per_kwh, 1)
+                if efficiency.bsfc_g_per_kwh is not None
+                else None
+            ),
+            efficiency_trend=efficiency.trend,  # type: ignore[arg-type]
+            maintenance_advisories=[
+                MaintenanceAdvisory(**a.to_dict()) for a in advisories
+            ],
+            is_replay=False,
         )
         self._latest = frame
         return frame
@@ -237,8 +381,11 @@ class SimulationLoop:
 
 
 async def run_simulation(app) -> None:
-    """Background task: tick the simulation and broadcast frames at the configured rate."""
+    """Background task: tick the simulation, persist frames if a mission is recording,
+    and broadcast at the configured rate."""
     from app.api import ws_telemetry
+    from app.db.repository import repository
+    from app.sim.replay_engine import replay_engine
 
     sim: SimulationLoop = app.state.sim
     last = time.perf_counter()
@@ -252,4 +399,20 @@ async def run_simulation(app) -> None:
         except Exception:
             logger.exception("Simulation tick failed")
             continue
-        await ws_telemetry.manager.broadcast_json(frame.model_dump())
+
+        payload = frame.model_dump()
+
+        # Persistence happens only inside an explicit mission session. Ad-hoc testing
+        # still streams live; it just is not recorded.
+        if sim.active_mission_id is not None:
+            try:
+                repository.save_frame(sim.active_mission_id, payload)
+            except Exception:
+                logger.exception("Failed to persist telemetry frame")
+
+        # The physics keeps running during a replay (so returning to live is instant),
+        # but the replay engine owns the socket while it is active.
+        if replay_engine.active:
+            continue
+
+        await ws_telemetry.manager.broadcast_json(payload)

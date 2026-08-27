@@ -24,7 +24,14 @@ from dataclasses import dataclass
 
 from app.twin.residual_analysis import ResidualReport
 
-SUBSYSTEMS: tuple[str, ...] = ("cylinder", "lubrication", "cooling", "fuel", "turbo")
+SUBSYSTEMS: tuple[str, ...] = (
+    "cylinder",
+    "lubrication",
+    "cooling",
+    "fuel",
+    "turbo",
+    "electrical",
+)
 
 #: subsystem -> list of (channel, weight, full_scale_residual, direction).
 #:
@@ -62,6 +69,10 @@ SUBSYSTEM_CHANNELS: dict[str, list[tuple[str, float, float, int]]] = {
         ("boost_pressure_kpa", 1.00, 32.0, -1),
         ("manifold_pressure_kpa", 0.75, 30.0, -1),
         ("vib_band_high", 0.35, 0.30, +1),
+    ],
+    "electrical": [
+        ("battery_voltage_v", 1.00, 2.2, -1),
+        ("alternator_output_v", 0.85, 2.5, -1),
     ],
 }
 

@@ -16,6 +16,7 @@ import random
 from dataclasses import dataclass, field
 
 from app.core.engine_params import PARAMS, EngineParams
+from app.physics.electrical_model import ElectricalModel, ElectricalOutputs
 from app.physics.engine_model import EngineModel, EngineOutputs
 from app.physics.fault_models import FaultState
 from app.physics.lubrication_model import LubricationModel, LubricationOutputs
@@ -42,6 +43,11 @@ class PlantState:
     eta_comb_mean: float = 0.0
     vibration_rms: list[float] = field(default_factory=list)
     vibration_features: list[VibrationFeatures] = field(default_factory=list)
+    # ---- Phase 3 ----------------------------------------------------------
+    battery_voltage_v: float = 0.0
+    alternator_output_v: float = 0.0
+    injection_timing_deg: float = 0.0
+    combustion_instability_pct: float = 0.0
 
     # ---- derived scalars used as residual channels -------------------------
 
@@ -100,6 +106,10 @@ class PlantState:
             "vibration_rms_max": self.vibration_rms_max,
             "crest_factor_max": self.crest_factor_max,
             "vib_band_high": self.vib_band_high,
+            # Phase 3 residual channels
+            "battery_voltage_v": self.battery_voltage_v,
+            "alternator_output_v": self.alternator_output_v,
+            "combustion_instability_pct": self.combustion_instability_pct,
         }
 
 
@@ -121,6 +131,10 @@ CHANNEL_SCALES: dict[str, float] = {
     "vibration_rms_max": 0.05,
     "crest_factor_max": 0.5,
     "vib_band_high": 0.05,
+    # Phase 3
+    "battery_voltage_v": 0.5,
+    "alternator_output_v": 0.6,
+    "combustion_instability_pct": 1.5,
 }
 
 CHANNELS: tuple[str, ...] = tuple(CHANNEL_SCALES.keys())
@@ -138,6 +152,7 @@ class EnginePlant:
         self.thermal = ThermalModel(params)
         self.lubrication = LubricationModel(params)
         self.vibration = VibrationModel(params, seed=seed + 1)
+        self.electrical = ElectricalModel(params)
         self.state = PlantState()
         #: The real engine is *measured* through noisy instruments; the digital twin is
         #: computed, so it has no sensors and no sensor noise.
@@ -149,6 +164,7 @@ class EnginePlant:
         self.thermal.reset()
         self.lubrication.reset()
         self.vibration.reset()
+        self.electrical.reset()
 
     def substep(
         self,
@@ -157,10 +173,16 @@ class EnginePlant:
         altitude_m: float,
         airspeed_ms: float,
         fault_state: FaultState,
+        ambient_temperature_c: float | None = None,
     ) -> EngineOutputs:
         """Advance every physics model by one integration sub-step."""
         eng: EngineOutputs = self.engine.step(
-            dt, throttle, altitude_m, fault_state, airspeed_ms=airspeed_ms
+            dt,
+            throttle,
+            altitude_m,
+            fault_state,
+            airspeed_ms=airspeed_ms,
+            ambient_temperature_c=ambient_temperature_c,
         )
         therm: ThermalOutputs = self.thermal.step(
             dt,
@@ -170,10 +192,12 @@ class EnginePlant:
             airspeed_ms=airspeed_ms,
             fault_state=fault_state,
             cooling_flap_command=throttle,
+            ambient_temperature_c=ambient_temperature_c,
         )
         lub: LubricationOutputs = self.lubrication.step(
             dt, rpm=eng.rpm, oil_temp_c=therm.oil_temp_c, fault_state=fault_state
         )
+        elec: ElectricalOutputs = self.electrical.step(dt, eng.rpm, fault_state)
         vib = self.vibration.generate_window(
             dt,
             rpm=eng.rpm,
@@ -196,6 +220,10 @@ class EnginePlant:
         self.state.oil_temp_c = therm.oil_temp_c
         self.state.oil_pressure_kpa = lub.oil_pressure_kpa
         self.state.vibration_rms = vib.rms_per_cylinder
+        self.state.battery_voltage_v = elec.battery_voltage_v
+        self.state.alternator_output_v = elec.alternator_output_v
+        self.state.injection_timing_deg = eng.injection_timing_deg
+        self.state.combustion_instability_pct = eng.combustion_instability_pct
         return eng
 
     def finalise_tick(self) -> PlantState:

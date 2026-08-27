@@ -255,6 +255,108 @@ sub-steps per tick. Every time constant in the model (manifold 0.12 s, turbo 0.9
 0.25 s, EGT probe 1.6 s, thermal masses in the hundreds of seconds) is comfortably longer
 than 20 ms, so explicit Euler is stable here and cheaper than RK4.
 
+## 8b. Phase 3 additions
+
+### Electrical — `electrical_model.py`
+
+```
+V_alt  = V_regulated * tanh((RPM - rpm_cutin) / rpm_knee)     0 below cut-in
+         V_regulated = 14.2 * (1 - 0.30 * battery_alternator_degradation)
+V_batt += (V_target - V_batt) * dt/tau,    tau = 2.5 s
+         V_target = V_alt - I_load * R_internal        (charging)
+         R_internal = 0.022 * (1 + 6.0 * battery_alternator_degradation)
+```
+
+Cut-in 600 RPM, knee 900 RPM, so output saturates by roughly 1500 RPM. The fault attacks
+both halves — less regulated output *and* higher internal resistance — which is what makes
+it separable from a plain low-RPM condition: at idle both look like low voltage, but only
+the fault keeps voltage low once RPM recovers.
+
+### Injection timing — `engine_model.py`
+
+Nominal 22 deg BTDC. `injection_timing_drift` retards it by up to 11 deg at severity 1:
+
+```
+eta_comb *= clamp(1 - 0.011 * |timing_error|, 0.5, 1)      affected cylinder
+EGT      += 7.5 * |timing_error|                           burns late -> hotter exhaust
+```
+
+This is deliberately distinct from `fuel_injector_clog`, which changes the fuel *quantity*
+(and therefore AFR) rather than the *timing*. Both raise EGT on one cylinder; only the
+clog moves AFR, which is how they are told apart.
+
+### Combustion stability — COV(IMEP)
+
+Each cycle's IMEP is scattered multiplicatively:
+
+```
+sigma      = 0.018 + 0.34*misfire + 0.16*spark + 0.12*timing_drift + 0.10*injector_clog
+IMEP_cycle = IMEP * N(1, sigma)
+COV        = 100 * std(IMEP_cycle / baseline) / mean(...)   over a 90-sample window
+```
+
+Healthy sits near 1.7%; above ~6% the engine is rough; above ~12% misfire is imminent.
+
+Two corrections matter here, and both were found by running the transient test:
+
+* **Detrending.** The window is divided by a fast-tracking baseline (tau 0.3 s), so a
+  legitimate change in load does not register as scatter.
+* **Transient gating.** COV is only defined at quasi-steady operation — engine test
+  standards measure it that way. During a manoeuvre the load genuinely changes cycle to
+  cycle and the statistic measures the manoeuvre, not combustion. The metric is therefore
+  held whenever `|d(MAP)/dt| / MAP > 0.30 /s`. **The transient is detected from manifold
+  pressure, not from IMEP** — IMEP is the noisy signal being measured, and a misfire makes
+  it jump around exactly like a throttle step, which would suppress the very fault the
+  metric exists to catch. Without the gate, every throttle movement raised a spurious
+  "immediate maintenance" advisory (measured: 80% COV on a 20%->100% step).
+
+### Ambient temperature — `environment.py`, `thermal_model.py`
+
+`atmosphere(altitude, ambient_temperature_c)` keeps the ISA pressure column (weather does
+not change the mass of air above you) but recomputes density at the actual temperature via
+`rho = p/(R*T)`. A hot day therefore thins the air beyond the altitude effect. Cooling is
+hit twice: the driving gradient `(T_cht - T_ambient)` shrinks on its own, and the cooling
+air itself carries less heat per unit volume:
+
+```
+h_eff *= max(0.45, 1 - 0.0055 * max(0, T_ambient - T_ISA(altitude)))
+```
+
+Scenarios: `standard` (ISA), `hot_weather` (48 degC), `cold_soak` (-25 degC).
+
+### Sensor faults — `sensor_fault_model.py`
+
+Architecturally distinct from everything above. These corrupt the **reported value**, not
+the engine, and are applied *after* the physics and *after* the twin has made its
+prediction:
+
+| type | Corruption | Engine truth |
+|---|---|---|
+| `egt_sensor_drift` | +165 degC offset on one probe at severity 1 | unaffected |
+| `oil_pressure_sensor_noise` | +55 kPa sigma noise, 10% dropouts to 25% of value | unaffected |
+| `rpm_sensor_stuck` | reading freezes at its last value above severity 0.5 | unaffected |
+
+The residual against the twin still shows an anomaly — that is the point. What separates
+them from real faults is correlation structure, handled in `app/ml/fault_classifier.py`.
+
+## 8c. Validation
+
+`python -m scripts.validate_physics --scenario throttle-transient` steps the throttle
+20% -> 100% -> 20% and measures the time to 63% of each excursion. Measured:
+
+| Signal | tau | Expected from |
+|---|---|---|
+| manifold pressure | 0.50 s | manifold filling, 0.12 s |
+| RPM | 0.60 s | crank inertia 0.62 kg m^2 against prop load |
+| boost pressure | 1.10 s | turbo spool, 0.95 s |
+| EGT (mean) | 3.30 s | probe lag 1.6 s + gas dynamics |
+| oil temperature | 10.70 s | 42 kJ/K |
+| CHT | 13.90 s | 26 kJ/K |
+
+The *ordering* is the result worth checking: pressures fastest, then rotational inertia,
+then exhaust gas, then metal and oil. Post-transient RPM peak-to-peak is 16 RPM, so the
+explicit Euler integrator is stable under a step excitation.
+
 ## 9. Known simplifications
 
 * No knock/detonation model, no valve timing, no per-cylinder charge imbalance from
@@ -264,3 +366,8 @@ than 20 ms, so explicit Euler is stable here and cheaper than RK4.
 * The propeller is a fixed-pitch `k*omega²` absorber with a lumped windmilling term; no
   advance-ratio or blade-element model.
 * Combustion is a mean-value energy balance, not a crank-angle-resolved burn.
+* Cycle-to-cycle IMEP scatter is injected stochastically rather than emerging from
+  turbulence and residual-gas modelling, so COV(IMEP) is calibrated in magnitude but not
+  derived from first principles.
+* The electrical model is a lumped RC analogy; there is no state-of-charge model, no
+  temperature dependence of pack resistance, and no load scheduling.

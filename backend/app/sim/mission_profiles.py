@@ -119,3 +119,50 @@ class MissionProfile:
 
     def commanded_throttle(self) -> float:
         return self.profile.throttle
+
+
+# ---- Phase 3: environmental scenarios ---------------------------------------
+
+#: Named operating environments. These set conditions the *airframe cannot control* —
+#: how hot the day is — as opposed to the phase profile, which sets what the autopilot
+#: commands. Hot-and-high is the classic MALE UAV problem case: thin, hot air both
+#: starves the engine of oxygen and robs the cooling system of its temperature gradient,
+#: so CHT climbs while available power falls.
+SCENARIOS: dict[str, dict] = {
+    "standard": {
+        "ambient_temperature_c": None,   # follow ISA for the current altitude
+        "description": "ISA standard day.",
+    },
+    "hot_weather": {
+        "ambient_temperature_c": 48.0,
+        "description": (
+            "Hot-and-high desert operation at 48 degC. Air density falls beyond the "
+            "ISA altitude effect, cooling effectiveness drops, and CHT margin shrinks."
+        ),
+    },
+    "cold_soak": {
+        "ambient_temperature_c": -25.0,
+        "description": (
+            "High-latitude cold start. Denser air improves breathing, but oil is thick "
+            "and cylinder heads run cool."
+        ),
+    },
+}
+
+
+def apply_scenario(sim, scenario: str) -> dict:
+    """Apply a named scenario to a running simulation loop."""
+    config = SCENARIOS.get(scenario)
+    if config is None:
+        return {
+            "ok": False,
+            "detail": f"unknown scenario '{scenario}'",
+            "available": list(SCENARIOS),
+        }
+    sim.set_ambient_temperature(config["ambient_temperature_c"])
+    return {
+        "ok": True,
+        "scenario": scenario,
+        "ambient_temperature_c": config["ambient_temperature_c"],
+        "description": config["description"],
+    }

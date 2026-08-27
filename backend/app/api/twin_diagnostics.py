@@ -33,8 +33,24 @@ async def diagnosis(request: Request) -> dict:
         "predicted_fault": diagnostics.predicted_fault,
         "prediction_confidence": round(diagnostics.prediction_confidence, 3),
         "classifier_available": diagnostics.classifier_available,
+        # ---- Phase 3: explainability and source attribution ----------------
+        "predicted_source": diagnostics.predicted_source,
+        "source_rationale": diagnostics.source_rationale,
+        "classifier_explanation": diagnostics.classifier_explanation,
+        "bsfc_g_per_kwh": diagnostics.bsfc_g_per_kwh,
+        "efficiency_trend": diagnostics.efficiency_trend,
         "ground_truth_faults": {
             k: round(v, 4) for k, v in sim.active_faults.items()
+        },
+        # Ground-truth sensor faults and the *uncorrupted* physical state. Exposed here
+        # for validation and debugging only — never on the telemetry stream, because the
+        # dashboard must infer sensor-vs-physical the way a real ground station would
+        # rather than being handed the answer.
+        "ground_truth_sensor_faults": {
+            k: round(v, 4) for k, v in diagnostics.sensor_fault_truth.items() if v > 1e-4
+        },
+        "true_state_uncorrupted": {
+            k: round(v, 3) for k, v in diagnostics.true_state.items()
         },
         "anomaly_scores": {
             k: round(v, 4) for k, v in diagnostics.anomaly_scores.items()

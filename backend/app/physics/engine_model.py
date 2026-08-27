@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections import deque
 from dataclasses import dataclass
 
 from app.core.engine_params import PARAMS, EngineParams
@@ -51,6 +52,9 @@ class EngineOutputs:
     heat_to_head_w: float             # -> thermal_model (CHT)
     friction_power_w: float           # -> thermal_model (oil)
     misfire_events: list[bool]        # per cylinder, this sub-step
+    # --- Phase 3 ---------------------------------------------------------
+    injection_timing_deg: float
+    combustion_instability_pct: float
 
 
 class EngineModel:
@@ -66,6 +70,24 @@ class EngineModel:
         self._egt_c: list[float] = [300.0] * params.n_cylinders
         self._rng = random.Random(seed)
         self._initialised = False
+        # Phase 3 state
+        self.injection_timing_deg: float = params.injection_timing_nominal_deg
+        self.combustion_instability_pct: float = 0.0
+        self._imep_history: deque[float] = deque(maxlen=params.imep_cov_window)
+        self._imep_baseline: float | None = None
+        self._transient_active: bool = False
+        self._prev_map_kpa: float = self.map_kpa
+
+    def _compute_imep_cov(self) -> float:
+        """Coefficient of variation of IMEP over the rolling window, as a percentage."""
+        n = len(self._imep_history)
+        if n < 12:
+            return 0.0
+        mean = sum(self._imep_history) / n
+        if mean <= 1e-6:
+            return 0.0
+        variance = sum((x - mean) ** 2 for x in self._imep_history) / n
+        return 100.0 * (variance**0.5) / mean
 
     # ---- initialisation ------------------------------------------------------
 
@@ -75,12 +97,19 @@ class EngineModel:
         self.rpm = rpm if rpm is not None else p.rpm_idle
         self.map_kpa = atm.pressure_kpa * 0.5
         self._egt_c = [420.0] * p.n_cylinders
+        self.injection_timing_deg = p.injection_timing_nominal_deg
+        self.combustion_instability_pct = 0.0
+        self._imep_history.clear()
+        self._imep_baseline = None
+        self._transient_active = False
+        self._prev_map_kpa = self.map_kpa
         self.turbo.reset(altitude_m)
         self._initialised = True
 
     # ---- sub-model helpers ---------------------------------------------------
 
-    def _eta_vol(self, rpm: float, map_kpa: float, altitude_m: float, fs: FaultState) -> float:
+    def _eta_vol(self, rpm: float, map_kpa: float, altitude_m: float, fs: FaultState,
+                 ambient_temperature_c: float | None = None) -> float:
         p = self.p
         # Breathing curve: smooth peak at eta_vol_rpm_peak, falling off either side.
         speed_term = math.exp(
@@ -92,7 +121,7 @@ class EngineModel:
             map_kpa / p.eta_vol_map_ref_kpa - 1.0
         )
         # Thin air degrades breathing slightly beyond the density term already in MAP.
-        sigma = density_ratio(altitude_m)
+        sigma = density_ratio(altitude_m, ambient_temperature_c)
         eta *= 1.0 + 0.25 * (sigma - 1.0)
         # A clogged air filter is a direct restriction on volumetric efficiency.
         eta *= 1.0 - p.f_air_filter_eta_vol_loss * fs.air_filter_clog
@@ -148,6 +177,7 @@ class EngineModel:
         altitude_m: float,
         fault_state: FaultState,
         airspeed_ms: float = 0.0,
+        ambient_temperature_c: float | None = None,
     ) -> EngineOutputs:
         p = self.p
         if not self._initialised:
@@ -164,7 +194,7 @@ class EngineModel:
             )
             throttle = max(throttle, bypass)
 
-        atm = atmosphere(altitude_m)
+        atm = atmosphere(altitude_m, ambient_temperature_c)
 
         # ---- 1. induction path: air filter -> turbo -> throttle -> manifold ----
         # A clogged filter drops compressor *inlet* pressure, worse at high flow.
@@ -179,6 +209,7 @@ class EngineModel:
             altitude_m,
             fault_state,
             inlet_pressure_kpa=inlet_pressure_kpa,
+            ambient_temperature_c=ambient_temperature_c,
         )
         feed_pressure_kpa = max(p.map_min_kpa, turbo.boost_pressure_kpa)
 
@@ -191,7 +222,9 @@ class EngineModel:
         )
 
         # ---- 2. air and fuel flow ---------------------------------------------
-        eta_vol = self._eta_vol(self.rpm, self.map_kpa, altitude_m, fault_state)
+        eta_vol = self._eta_vol(
+            self.rpm, self.map_kpa, altitude_m, fault_state, ambient_temperature_c
+        )
         rev_per_s = self.rpm / 60.0
         cycles_per_s = rev_per_s / p.revs_per_cycle
 
@@ -220,6 +253,19 @@ class EngineModel:
             else -1
         )
 
+        # Phase 3: injection timing. Drift away from the nominal crank angle burns less
+        # completely and pushes heat into the exhaust — a *quality* fault, distinct from
+        # fuel_injector_clog, which changes the fuel *quantity* reaching one cylinder.
+        timing_idx = (
+            fault_state.cylinder_for("injection_timing_drift", p.n_cylinders)
+            if fault_state.injection_timing_drift > 1e-4
+            else -1
+        )
+        timing_error_deg = (
+            p.f_injection_timing_drift_deg * fault_state.injection_timing_drift
+        )
+        self.injection_timing_deg = p.injection_timing_nominal_deg - timing_error_deg
+
         for i in range(p.n_cylinders):
             eta = p.eta_comb_nominal
             # Mixture that is far off stoichiometric burns less completely.
@@ -227,6 +273,10 @@ class EngineModel:
             eta *= _clamp(afr_penalty, 0.55, 1.0)
             if i == spark_idx:
                 eta *= 1.0 - p.f_spark_eta_comb_loss * fault_state.spark_degradation
+            if i == timing_idx:
+                eta *= _clamp(
+                    1.0 - p.injection_timing_sensitivity * abs(timing_error_deg), 0.5, 1.0
+                )
 
             misfired = False
             if i == misfire_idx:
@@ -254,6 +304,64 @@ class EngineModel:
             imep_pa = indicated_power_w / (p.displacement_m3 * cycles_per_s)
         else:
             imep_pa = 0.0
+
+        # ---- Phase 3: cycle-to-cycle combustion stability ----------------------
+        # Real engines never produce identical consecutive cycles — turbulence and
+        # residual-gas variation scatter IMEP by a percent or two even when healthy.
+        # Anything that destabilises the flame kernel widens that scatter, and it widens
+        # *before* the engine starts dropping whole cycles. That is why COV(IMEP) is a
+        # genuine leading indicator rather than just another way to observe a misfire:
+        # it rises during the ramp, while the misfire dropout probability is still too
+        # low to have produced a visible dead cycle.
+        cov_sigma = p.imep_cov_baseline
+        cov_sigma += p.imep_cov_misfire_gain * fault_state.misfire
+        cov_sigma += p.imep_cov_spark_gain * fault_state.spark_degradation
+        cov_sigma += p.imep_cov_timing_gain * fault_state.injection_timing_drift
+        cov_sigma += p.imep_cov_injector_gain * fault_state.fuel_injector_clog
+
+        cycle_scatter = self._rng.gauss(1.0, cov_sigma)
+        imep_this_cycle = imep_pa * max(0.0, cycle_scatter)
+
+        # Detrend before measuring scatter. COV is meant to capture *cycle-to-cycle*
+        # variability, but a raw rolling COV also picks up any change in the mean — so
+        # opening the throttle, which legitimately doubles IMEP, would read as ~80%
+        # instability and trigger a spurious "immediate maintenance" advisory on every
+        # throttle movement. Dividing by a fast-tracking baseline cancels the level shift
+        # while leaving the per-cycle scatter intact, which is the quantity we actually
+        # want.
+        if self._imep_baseline is None or self._imep_baseline <= 1e-6:
+            self._imep_baseline = max(imep_this_cycle, 1e-6)
+        else:
+            alpha = min(1.0, dt / max(1e-6, p.imep_baseline_tau_s))
+            self._imep_baseline += (imep_this_cycle - self._imep_baseline) * alpha
+
+        # Detect the manoeuvre from manifold pressure, not from IMEP. IMEP is the noisy
+        # signal we are trying to measure the noise of — a misfire makes it jump around
+        # violently, which would look exactly like a throttle transient and suppress the
+        # very fault we need to see. MAP is smooth, moves only when the operator actually
+        # commands a change, and is unaffected by combustion scatter.
+        map_rate = abs(self.map_kpa - self._prev_map_kpa) / (
+            max(1e-6, self._prev_map_kpa) * max(1e-6, dt)
+        )
+        self._prev_map_kpa = self.map_kpa
+        baseline_rate = map_rate
+
+        # COV(IMEP) is only defined at quasi-steady operation — engine test standards
+        # measure it that way for a reason. During a throttle transient the load is
+        # genuinely changing cycle to cycle, so the statistic measures the manoeuvre
+        # rather than combustion quality, and no amount of detrending fixes that. Hold
+        # the last steady reading instead of reporting a number that means something
+        # else. Without this, every throttle movement raises a spurious "immediate
+        # maintenance" advisory.
+        self._transient_active = baseline_rate > p.imep_transient_rate_threshold
+        if self._transient_active:
+            # Drop the window rather than mixing pre- and post-manoeuvre cycles, and hold
+            # the last steady reading until enough new steady cycles have accumulated.
+            self._imep_history.clear()
+        else:
+            self._imep_history.append(imep_this_cycle / self._imep_baseline)
+            self.combustion_instability_pct = self._compute_imep_cov()
+
         torque_indicated = imep_pa * p.displacement_m3 / (4.0 * math.pi)
 
         # ---- 5. friction and load ----------------------------------------------
@@ -301,6 +409,9 @@ class EngineModel:
             t_k = intake_temp_k + delta_t
             # Blow-by adds a little exhaust heat across all cylinders.
             t_k += p.f_ring_wear_egt_rise_k * fault_state.piston_ring_wear
+            # Retarded injection burns late, so more heat leaves through the valve.
+            if i == timing_idx:
+                t_k += p.injection_timing_egt_per_deg * abs(timing_error_deg)
             t_k += self._cylinder_trim_c(i)
             egt_target.append(t_k - 273.15)
 
@@ -332,6 +443,8 @@ class EngineModel:
             heat_to_head_w=heat_to_head_w,
             friction_power_w=friction_power_w,
             misfire_events=misfire_events,
+            injection_timing_deg=self.injection_timing_deg,
+            combustion_instability_pct=self.combustion_instability_pct,
         )
 
 

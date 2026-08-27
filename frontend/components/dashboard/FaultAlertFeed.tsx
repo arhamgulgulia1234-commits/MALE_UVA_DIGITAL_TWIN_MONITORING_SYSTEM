@@ -5,12 +5,12 @@ import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useTelemetryStore } from "@/lib/store";
-import { FAULT_CATALOG, type FaultType } from "@/lib/types";
+import { FAULT_CATALOG, SENSOR_FAULT_CATALOG } from "@/lib/types";
 import { formatTimeHHMMSS } from "@/lib/format";
 
 interface FeedEntry {
   id: string;
-  type: FaultType;
+  type: string;
   event: "detected" | "cleared";
   severity: number;
   timestamp: number;
@@ -25,7 +25,7 @@ function severityTone(s: number): "caution" | "nogo" | "cyan" {
 export function FaultAlertFeed() {
   const latest = useTelemetryStore((s) => s.latest);
   const [feed, setFeed] = useState<FeedEntry[]>([]);
-  const prevTypesRef = useRef<Set<FaultType>>(new Set());
+  const prevTypesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!latest) return;
@@ -76,7 +76,9 @@ export function FaultAlertFeed() {
         <ul className="flex flex-col gap-2">
           <AnimatePresence initial={false}>
             {feed.map((entry) => {
-              const meta = FAULT_CATALOG.find((f) => f.type === entry.type);
+              const meta =
+                FAULT_CATALOG.find((f) => f.type === entry.type) ??
+                SENSOR_FAULT_CATALOG.find((f) => f.type === entry.type);
               const liveSeverity =
                 entry.event === "detected" ? activeSeverityByType.get(entry.type) : undefined;
               const displaySeverity = liveSeverity ?? entry.severity;

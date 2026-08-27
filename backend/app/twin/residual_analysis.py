@@ -105,17 +105,26 @@ class ResidualMonitor:
         for channel in CHANNELS:
             names.append(f"{channel}__norm_mean")
             names.append(f"{channel}__z")
+            names.append(f"{channel}__norm_std")
         return names
 
     def feature_vector(self) -> list[float]:
-        """Normalised residual mean and z-score per channel.
+        """Normalised residual mean, z-score and dispersion per channel.
 
-        Normalising the mean by the channel scale keeps every feature O(1) so a
-        RandomForest is not dominated by the RPM channel's raw magnitude."""
+        Normalising by the channel scale keeps every feature O(1) so a RandomForest is
+        not dominated by the RPM channel's raw magnitude.
+
+        The dispersion term exists specifically for noise-type sensor faults. A sensor
+        that has become *noisy* rather than *biased* leaves the residual mean near zero —
+        the noise cancels — so mean and z alone cannot see it, and no amount of threshold
+        tuning will help. What changes is the spread. Carrying std as its own feature is
+        what lets the classifier separate "this reading is wrong" from "this reading is
+        unreliable", which are different maintenance actions."""
         values: list[float] = []
         for channel in CHANNELS:
             stat = self._stats[channel]
             scale = CHANNEL_SCALES.get(channel, 1.0)
             values.append(stat.mean / scale)
             values.append(min(stat.z_score, 50.0))
+            values.append(min((stat.variance**0.5) / scale, 50.0))
         return values

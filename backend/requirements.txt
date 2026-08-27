@@ -9,3 +9,6 @@ numpy==2.1.3
 scikit-learn==1.5.2
 joblib==1.4.2
 matplotlib==3.9.2
+
+# Phase 3 — mission persistence, replay and reporting
+SQLAlchemy==2.0.36

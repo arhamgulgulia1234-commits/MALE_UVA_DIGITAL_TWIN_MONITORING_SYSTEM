@@ -5,7 +5,7 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { useTelemetryStore } from "@/lib/store";
 import type { SubsystemScores } from "@/lib/types";
 
-const SUBSYSTEM_LABEL: Record<keyof SubsystemScores, string> = {
+const SUBSYSTEM_LABEL: Partial<Record<keyof SubsystemScores, string>> = {
   cylinder: "Cylinder",
   lubrication: "Lubrication",
   cooling: "Cooling",

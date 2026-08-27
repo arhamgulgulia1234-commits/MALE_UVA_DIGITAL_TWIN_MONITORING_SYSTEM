@@ -19,7 +19,13 @@ dashboard.
   residual layer, and a PHM stack (anomaly detection, RandomForest fault classification,
   RUL extrapolation, Weibull mission reliability). **The WebSocket contract is byte-for-byte
   identical to Phase 1 — no frontend file changed.**
-- **Phase 3 (future):** Learned anomaly detector and sequence-model RUL in place of the
+- **Phase 3 (done — current state):** Mission recording and replay (SQLite), electrical +
+  injection-timing + combustion-stability physics, **sensor faults** (corrupt the reading,
+  not the engine) with physical-vs-sensor disambiguation, BSFC efficiency tracking,
+  rule-based maintenance advisories, post-mission reports, bearer-token auth, and a
+  CAN-bus ingestion adapter interface. Schema extended with optional fields only — every
+  Phase 1/2 panel renders unchanged.
+- **Phase 4 (future):** Learned anomaly detector and sequence-model RUL in place of the
   hand-weighted mapping and trend fit; calibrated reliability model.
 
 ## Repo layout
@@ -31,13 +37,17 @@ backend/     FastAPI — physics simulation, digital twin, PHM/ML layer
   app/twin/      healthy reference engine + residual statistics
   app/ml/        anomaly detection, fault classifier, RUL, mission reliability
   app/sim/       tick loop, mission profile (+ Phase 1 mock as a fallback)
+  app/db/        mission persistence (SQLite): missions, frames, fault events
+  app/ingestion/ EngineDataAdapter boundary — simulated impl + documented CAN stub
   scripts/       headless physics validation with plots
 docs/        architecture, physics-model reference, demo script
 ml-notebooks/ (phase 3)
 ```
 
 See `docs/architecture.md` for the data flow, `docs/physics-model.md` for the actual
-equations and default parameters, and `docs/demo-script.md` for a 3-minute walkthrough.
+equations and default parameters, `docs/demo-script.md` for a 3-minute walkthrough, and
+`docs/deployment-roadmap.md` for the path from this prototype to a CAN-fed, edge-deployed
+system.
 
 ---
 
@@ -75,13 +85,20 @@ injects faults, jumps mission phases, and changes simulated time speed.
 ```bash
 cd backend
 source .venv/bin/activate
+
+# Fault scenario — 10-min mission, fault injected at 3 min. Writes plots 01..07.
 python -m scripts.validate_physics --fault bearing_wear
+
+# Rapid throttle transient 20% -> 100% -> 20%. Writes plot 08 and prints time constants.
+python -m scripts.validate_physics --scenario throttle-transient
 ```
 
-Flies a 10-minute mission, injects the fault at the 3-minute mark, and writes 7 plots to
-`backend/scripts/output/` — engine core, temperatures, lubrication, vibration, health,
-prognostics, and twin residuals. Options: `--fault <type>` (any of the nine),
-`--minutes`, `--inject-at`, `--severity`, `--ramp`.
+Plots land in `backend/scripts/output/` — engine core, temperatures, lubrication,
+vibration, health, prognostics, twin residuals, and the throttle transient. Options:
+`--fault <type>` (any of the eleven), `--minutes`, `--inject-at`, `--severity`, `--ramp`.
+
+The database is created automatically on first backend start (`backend/data/telemetry.db`)
+— there is no separate migration step.
 
 ### 4. Train the fault classifier (optional)
 
@@ -113,3 +130,26 @@ Restart the backend to pick up the saved model. Inspect its live opinion at
 | `POST /control/phase` | `{phase}` climb / cruise / loiter / descent |
 | `GET /twin/diagnosis` | Residuals, twin reference values, anomaly scores, classifier prediction |
 | `GET /health` | Liveness |
+| `POST /control/sensor-fault` | `{type, severity, ramp_seconds}` — corrupts a *reading*, not the engine |
+| `POST /control/clear-sensor-fault` | `{fault_type}` |
+| `POST /control/scenario` | `{scenario}` standard / hot_weather / cold_soak |
+| `POST /control/ambient-temperature` | `{ambient_temperature_c}` (null restores ISA) |
+| `POST /control/mission/start` | `{profile_name, notes}` — begins recording |
+| `POST /control/mission/end` | Ends recording, returns the mission report |
+| `GET /control/missions` | List recorded missions |
+| `GET /control/missions/{id}/report` | Mission debrief JSON |
+| `POST /control/replay/start` | `{mission_id, speed_factor}` |
+| `POST /control/replay/stop` | Return to live |
+
+### Authentication (optional)
+
+Disabled by default so the demo runs with no setup. To enforce:
+
+```bash
+TELEMETRY_AUTH_ENABLED=true TELEMETRY_TOKEN=<secret> uvicorn app.main:app --port 8000
+```
+
+Then set `NEXT_PUBLIC_TELEMETRY_TOKEN=<secret>` for the frontend. `/control/*` requires
+`Authorization: Bearer <token>`; the WebSocket also accepts `?token=` because browsers
+cannot set headers on a handshake. This is a hackathon-grade shared secret — see
+`docs/deployment-roadmap.md` for what a real deployment requires.

@@ -10,6 +10,9 @@ import { EngineVitalsGrid } from "@/components/dashboard/EngineVitalsGrid";
 import { TelemetryStrip } from "@/components/dashboard/TelemetryStrip";
 import { VibrationSpectrum } from "@/components/dashboard/VibrationSpectrum";
 import { FaultAlertFeed } from "@/components/dashboard/FaultAlertFeed";
+import { EfficiencyTrendChart } from "@/components/dashboard/EfficiencyTrendChart";
+import { MaintenanceAdvisoryPanel } from "@/components/dashboard/MaintenanceAdvisoryPanel";
+import { MissionReportView } from "@/components/dashboard/MissionReportView";
 import { ControlDeck } from "@/components/dashboard/ControlDeck";
 
 const EngineCutaway3D = dynamic(
@@ -43,11 +46,23 @@ export default function Home() {
 
         <EngineVitalsGrid />
         <TelemetryStrip />
-        <VibrationSpectrum />
-        <FaultAlertFeed />
+
+        {/* Phase 3: efficiency + combustion stability, beside the vibration spectrum */}
+        <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <EfficiencyTrendChart />
+          <VibrationSpectrum />
+        </section>
+
+        {/* Phase 3: advisories sit beside the raw fault feed — one says what happened,
+            the other says what to do about it. */}
+        <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <FaultAlertFeed />
+          <MaintenanceAdvisoryPanel />
+        </section>
       </main>
 
       <ControlDeck />
+      <MissionReportView />
     </div>
   );
 }

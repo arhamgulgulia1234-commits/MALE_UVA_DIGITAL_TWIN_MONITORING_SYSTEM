@@ -2,6 +2,7 @@
 
 import clsx from "clsx";
 import { Sparkline } from "@/components/charts/Sparkline";
+import { BatteryAlternatorTile } from "./BatteryAlternatorTile";
 import { useTelemetryStore } from "@/lib/store";
 import { HEALTHY_BANDS, type TelemetryFrame } from "@/lib/types";
 import { bandStatus, type BandStatus } from "@/lib/format";
@@ -118,6 +119,9 @@ export function EngineVitalsGrid() {
         {VITALS.map((def) => (
           <VitalTile key={def.key} def={def} />
         ))}
+        {/* Phase 3: electrical bus. Rendered here rather than added to VITALS because
+            it shows two related signals (battery vs alternator), not one. */}
+        <BatteryAlternatorTile />
       </div>
     </section>
   );

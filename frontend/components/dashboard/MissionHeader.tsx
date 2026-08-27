@@ -61,6 +61,7 @@ export function MissionHeader() {
   }, [startedAt]);
 
   const recommendation = latest?.mission_reliability.recommendation ?? "GO";
+  const isReplay = latest?.is_replay ?? false;
   const style = RECOMMENDATION_STYLE[recommendation];
   const conn = CONN_LABEL[status];
 
@@ -91,6 +92,12 @@ export function MissionHeader() {
               {latest ? PHASE_LABEL[latest.mission_phase] : "—"}
             </span>
           </div>
+
+          {isReplay && (
+            <span className="animate-pulseGlow rounded-md border border-status-amber/50 bg-status-amber/15 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.15em] text-status-amber">
+              ⏵ Replay{latest?.replay_mission_id ? ` #${latest.replay_mission_id}` : ""}
+            </span>
+          )}
 
           <div className="flex items-center gap-1.5 text-[11px]">
             <span className={clsx("h-1.5 w-1.5 rounded-full", conn.tone.replace("text-", "bg-"))} />

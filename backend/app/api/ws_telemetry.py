@@ -1,12 +1,23 @@
-"""WebSocket endpoint that broadcasts the mock TelemetryFrame stream to every connected
-dashboard client at the configured tick rate (see app.core.config.settings.sim_tick_hz).
+"""WebSocket endpoint broadcasting TelemetryFrames to every connected dashboard.
 
-TODO(phase-2): the broadcast mechanics here stay the same; only the source of frames
-changes (app.twin.digital_twin instead of app.sim.simulation_loop).
+The same socket carries live physics and replayed missions — `app/sim/replay_engine.py`
+pushes stored frames through this exact broadcast path, so the frontend needs no
+replay-specific code. Frames carry `is_replay` purely so the UI can show a badge.
+
+Phase 3 adds a bearer-token check on the handshake. Browsers cannot set headers when
+opening a WebSocket, so a `?token=` query parameter is accepted alongside the
+Authorization header; see app/core/security.py for why that is a demo-grade compromise
+and what a real deployment should do instead.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import logging
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+
+from app.core.security import auth_enabled, websocket_token_ok
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -33,17 +44,31 @@ class ConnectionManager:
         for ws in dead:
             self.disconnect(ws)
 
+    @property
+    def client_count(self) -> int:
+        return len(self.active)
+
 
 manager = ConnectionManager()
 
 
 @router.websocket("/ws/telemetry")
 async def ws_telemetry(websocket: WebSocket) -> None:
+    if not websocket_token_ok(
+        websocket.headers.get("authorization"),
+        websocket.query_params.get("token"),
+    ):
+        logger.warning("Rejected telemetry WebSocket: bad or missing token")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await manager.connect(websocket)
+    if auth_enabled():
+        logger.info("Telemetry client authenticated and connected")
     try:
         while True:
-            # Client -> server messages aren't required for telemetry (control happens
-            # over REST), but we still need to await something to detect disconnects.
+            # Control happens over REST, so nothing is expected from the client — but we
+            # must await something to notice a disconnect.
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)

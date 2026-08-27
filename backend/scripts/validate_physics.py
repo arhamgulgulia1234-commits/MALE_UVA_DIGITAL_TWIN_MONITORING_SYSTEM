@@ -110,6 +110,176 @@ def run(fault_type: str, minutes: float, inject_at_min: float, severity: float,
     return rec
 
 
+def run_throttle_transient(
+    hold_s: float = 40.0,
+    step_s: float = 25.0,
+    low: float = 0.20,
+    high: float = 1.00,
+) -> dict:
+    """Step the throttle 20% -> 100% -> 20% and record the response.
+
+    This is the sharpest test of whether the dynamics are actually dynamics. A model that
+    computes steady-state values and calls them physics will jump instantly; a real engine
+    cannot. What we are checking for:
+
+      * **Turbo lag** — boost must trail the throttle step by roughly `turbo_tau_s`,
+        which in turn delays manifold pressure and torque.
+      * **Rotational inertia** — RPM must ramp, not step, as the crank accelerates against
+        the propeller load.
+      * **Thermal lag** — EGT follows within seconds (small gas mass, fast probe), CHT
+        over tens of seconds (26 kJ/K of aluminium), oil slower still. The *ordering* of
+        those time constants is the thing to verify.
+      * **Stability** — no oscillation growth, no divergence. An unstable integrator
+        shows up here first, because a step excites every mode at once.
+
+    Run at 1x so the sub-stepping is doing real work rather than being smeared by time
+    acceleration.
+    """
+    sim = SimulationLoop()
+    sim.set_time_scale(1.0)
+    # Hold a steady phase so the transient is not confounded by the mission profile
+    # changing altitude and airspeed underneath it.
+    sim.jump_phase("cruise")
+
+    schedule = [(hold_s, low), (step_s, high), (hold_s, low)]
+
+    rec: dict[str, list] = {k: [] for k in (
+        "t", "throttle", "rpm", "map", "boost", "power", "fuel",
+        "cht", "oil_t", "oil_p", "egt_mean", "cov",
+    )}
+
+    t_elapsed = 0.0
+    for duration, throttle in schedule:
+        sim.set_throttle(throttle)
+        for _ in range(int(duration / TICK_S)):
+            frame = sim.tick(TICK_S)
+            state = sim.plant.state
+            t_elapsed += TICK_S
+            rec["t"].append(t_elapsed)
+            rec["throttle"].append(throttle)
+            rec["rpm"].append(frame.rpm)
+            rec["map"].append(frame.manifold_pressure_kpa)
+            rec["boost"].append(frame.boost_pressure_kpa)
+            rec["power"].append(state.power_brake_kw)
+            rec["fuel"].append(frame.fuel_flow_lph)
+            rec["cht"].append(frame.cht_c)
+            rec["oil_t"].append(frame.oil_temp_c)
+            rec["oil_p"].append(frame.oil_pressure_kpa)
+            rec["egt_mean"].append(state.egt_mean_c)
+            rec["cov"].append(frame.combustion_instability_pct)
+
+    rec["_step_up_s"] = hold_s
+    rec["_step_down_s"] = hold_s + step_s
+    return rec
+
+
+def _rise_time(times: list[float], values: list[float], start_s: float,
+               end_s: float, fraction: float = 0.632) -> float | None:
+    """Time for a signal to cover `fraction` of its excursion after a step.
+
+    0.632 is one time constant for a first-order system, so this reads directly as tau."""
+    window = [(t, v) for t, v in zip(times, values) if start_s <= t <= end_s]
+    if len(window) < 5:
+        return None
+    v0 = window[0][1]
+    v_end = max(v for _, v in window) if window[-1][1] > v0 else min(v for _, v in window)
+    span = v_end - v0
+    if abs(span) < 1e-6:
+        return None
+    target = v0 + span * fraction
+    for t, v in window:
+        if (span > 0 and v >= target) or (span < 0 and v <= target):
+            return t - start_s
+    return None
+
+
+def _report_transient(rec: dict) -> None:
+    t = rec["t"]
+    up = rec["_step_up_s"]
+    down = rec["_step_down_s"]
+
+    print("\n--- transient response (time to 63% of excursion after the step) ---")
+    for label, key in (
+        ("boost pressure", "boost"),
+        ("manifold pressure", "map"),
+        ("RPM", "rpm"),
+        ("EGT (mean)", "egt_mean"),
+        ("CHT", "cht"),
+        ("oil temperature", "oil_t"),
+    ):
+        tau = _rise_time(t, rec[key], up, down)
+        print(f"  {label:20s} {'—' if tau is None else f'{tau:6.2f} s'}")
+
+    # Stability: after the step-down and a settling period, the signal should be flat.
+    tail = [v for tv, v in zip(t, rec["rpm"]) if tv > down + 15.0]
+    if len(tail) > 20:
+        mean = sum(tail) / len(tail)
+        spread = max(tail) - min(tail)
+        print(
+            f"\n  post-transient RPM: mean {mean:.0f}, peak-to-peak {spread:.0f} "
+            f"({'stable' if spread < 120 else 'CHECK — possible oscillation'})"
+        )
+
+
+def plot_throttle_transient(rec: dict) -> list[Path]:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    t = rec["t"]
+    up, down = rec["_step_up_s"], rec["_step_down_s"]
+
+    def mark(ax) -> None:
+        ax.axvline(up, color=C_FAULT, ls="--", lw=1.1, alpha=0.8)
+        ax.axvline(down, color=C_FAULT, ls="--", lw=1.1, alpha=0.8)
+        ax.grid(alpha=0.25, linewidth=0.6)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.tick_params(labelsize=8)
+
+    fig, axes = plt.subplots(5, 1, figsize=(11, 12), sharex=True)
+
+    axes[0].plot(t, rec["throttle"], color="#666", lw=1.4, drawstyle="steps-post")
+    axes[0].set_ylabel("throttle", fontsize=9)
+    axes[0].set_title("Commanded throttle (step input)", fontsize=11, loc="left",
+                      fontweight="600")
+    mark(axes[0])
+
+    axes[1].plot(t, rec["boost"], color=C_ACCENT, lw=1.3, label="Boost")
+    axes[1].plot(t, rec["map"], color=C_PRIMARY, lw=1.3, label="MAP")
+    axes[1].legend(fontsize=8, frameon=False)
+    axes[1].set_ylabel("kPa (abs)", fontsize=9)
+    axes[1].set_title("Intake pressures — turbo lag", fontsize=11, loc="left",
+                      fontweight="600")
+    mark(axes[1])
+
+    axes[2].plot(t, rec["rpm"], color=C_PRIMARY, lw=1.3)
+    axes[2].set_ylabel("RPM", fontsize=9)
+    axes[2].set_title("Crankshaft speed — rotational inertia", fontsize=11, loc="left",
+                      fontweight="600")
+    mark(axes[2])
+
+    axes[3].plot(t, rec["egt_mean"], color=C_FAULT, lw=1.3, label="EGT (mean)")
+    axes[3].plot(t, rec["cht"], color=C_ACCENT, lw=1.3, label="CHT")
+    axes[3].plot(t, rec["oil_t"], color=C_THIRD, lw=1.3, label="Oil temp")
+    axes[3].legend(fontsize=8, frameon=False)
+    axes[3].set_ylabel("°C", fontsize=9)
+    axes[3].set_title("Thermal response — note the ordering of time constants",
+                      fontsize=11, loc="left", fontweight="600")
+    mark(axes[3])
+
+    axes[4].plot(t, rec["cov"], color=C_FOURTH, lw=1.3)
+    axes[4].set_ylabel("COV %", fontsize=9)
+    axes[4].set_xlabel("time (s)", fontsize=9)
+    axes[4].set_title("Combustion stability through the transient", fontsize=11,
+                      loc="left", fontweight="600")
+    mark(axes[4])
+
+    fig.suptitle("Rapid throttle transition: 20% → 100% → 20%", fontsize=13,
+                 fontweight="600")
+    fig.tight_layout()
+    path = OUTPUT_DIR / "08_throttle_transient.png"
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+    return [path]
+
+
 def plot_all(rec: dict, fault_type: str) -> list[Path]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     t = rec["t"]
@@ -248,12 +418,29 @@ def main() -> None:
     parser.add_argument("--ramp", type=float, default=45.0)
     parser.add_argument("--time-scale", type=float, default=10.0)
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument(
+        "--scenario",
+        default="fault",
+        choices=["fault", "throttle-transient"],
+        help="'fault' injects a fault mid-mission; 'throttle-transient' steps the "
+             "throttle 20%%->100%%->20%% to check turbo and thermal lag",
+    )
     args = parser.parse_args()
 
     if args.quiet:
         logging.disable(logging.CRITICAL)
     else:
         logging.basicConfig(level=logging.WARNING)
+
+    if args.scenario == "throttle-transient":
+        print("Simulating a rapid throttle transient: 20% -> 100% -> 20%…")
+        rec = run_throttle_transient()
+        written = plot_throttle_transient(rec)
+        _report_transient(rec)
+        print(f"\nWrote {len(written)} plots to {OUTPUT_DIR}/")
+        for path in written:
+            print(f"  {path.name}")
+        return
 
     print(f"Simulating {args.minutes:.0f} min, injecting '{args.fault}' at "
           f"{args.inject_at:.0f} min (severity {args.severity}, ramp {args.ramp:.0f}s)…")

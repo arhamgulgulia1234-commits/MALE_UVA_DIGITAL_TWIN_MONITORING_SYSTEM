@@ -20,3 +20,4 @@ backend/.pytest_cache/
 frontend/tsconfig.tsbuildinfo
 backend/app/ml/train/training_data.npz
 backend/scripts/output/
+backend/data/

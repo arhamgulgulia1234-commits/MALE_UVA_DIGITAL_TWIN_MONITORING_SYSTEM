@@ -23,6 +23,9 @@ FAULT_TYPES: tuple[str, ...] = (
     "fuel_injector_clog",
     "turbo_wear",
     "air_filter_clog",
+    # --- Phase 3 additions -------------------------------------------------
+    "battery_alternator_degradation",
+    "injection_timing_drift",
 )
 
 #: Faults that manifest on one specific cylinder rather than the whole engine.
@@ -30,6 +33,7 @@ CYLINDER_LOCALISED_FAULTS: tuple[str, ...] = (
     "misfire",
     "spark_degradation",
     "fuel_injector_clog",
+    "injection_timing_drift",
 )
 
 
@@ -63,6 +67,9 @@ class FaultState:
     fuel_injector_clog: float = 0.0
     turbo_wear: float = 0.0
     air_filter_clog: float = 0.0
+    # --- Phase 3 additions ---------------------------------------------------
+    battery_alternator_degradation: float = 0.0
+    injection_timing_drift: float = 0.0
 
     #: fault type -> 0-indexed cylinder it affects
     target_cylinder: dict[str, int] = field(default_factory=dict)
