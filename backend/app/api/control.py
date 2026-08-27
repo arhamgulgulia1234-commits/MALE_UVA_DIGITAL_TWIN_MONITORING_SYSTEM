@@ -21,7 +21,16 @@ router = APIRouter(prefix="/control")
 async def inject_fault(req: FaultInjectRequest, request: Request) -> dict:
     sim = request.app.state.sim
     sim.inject_fault(req.type, req.severity, req.ramp_seconds)
-    return {"ok": True, "active_faults": list(sim.active_faults.keys())}
+    # `active_faults` only lists faults whose severity has already risen above zero, so
+    # immediately after injection a ramping fault is not in it yet. Report what was
+    # commanded as well, otherwise the response looks like the call did nothing.
+    return {
+        "ok": True,
+        "injected": req.type,
+        "target_severity": req.severity,
+        "ramp_seconds": req.ramp_seconds,
+        "active_faults": list(sim.active_faults.keys()),
+    }
 
 
 @router.post("/clear-fault")

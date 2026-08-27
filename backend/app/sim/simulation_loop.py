@@ -1,312 +1,255 @@
-"""Phase 1 mock telemetry generator.
+"""The Phase 2 simulation loop: real physics -> digital twin -> PHM -> TelemetryFrame.
 
-Produces a believable TelemetryFrame every tick using sine-wave baselines + small random
-noise per signal, driven by a simple mission-phase state machine (climb -> cruise ->
-loiter -> descent -> climb ...), with fault injection that gradually ramps affected
-signals + subsystem health scores + overall health + RUL + mission reliability per the
-fault table in docs/physics-model.md.
+Each 100 ms wall-clock tick:
 
-TODO(phase-2): this entire module gets replaced by app/twin/digital_twin.py driving
-app/physics/*. The TelemetryFrame contract stays identical so the API layer and frontend
-do not change.
+  1. Work out how much *simulated* time to advance (100 ms x the time-acceleration
+     factor) and split it into fixed 20 ms integration sub-steps.
+  2. For every sub-step: advance the mission profile, ramp any in-flight fault, then step
+     the real EnginePlant and the healthy DigitalTwin with identical commands.
+  3. Once per tick: compute spectral features, take residuals against the twin, update the
+     residual monitor, anomaly detector, RUL predictor and mission-reliability model.
+  4. Assemble a TelemetryFrame in the exact Phase 1 schema and broadcast it.
+
+The frame schema is unchanged from Phase 1 — the frontend cannot tell the difference
+except that the numbers are now physically derived.
 """
 from __future__ import annotations
 
-import math
-import random
+import asyncio
+import logging
 import time
 from dataclasses import dataclass, field
 
+from app.core.config import settings
+from app.core.engine_params import PARAMS, EngineParams
 from app.core.models import (
     ActiveFault,
     CylinderReading,
     HealthState,
     MissionReliability,
+    SubsystemScores,
     TelemetryFrame,
 )
-from app.sim.mission_profiles import (
-    BASE_ALTITUDE_M,
-    NUM_CYLINDERS,
-    PHASE_ORDER,
-    PHASE_PROFILES,
-    MissionPhase,
-)
+from app.ml.anomaly_detector import AnomalyDetector, AnomalyReport
+from app.ml.fault_classifier import Diagnosis, FaultClassifier
+from app.ml.mission_reliability import MissionReliabilityModel
+from app.ml.rul_predictor import RULPredictor
+from app.physics.fault_models import FaultState
+from app.physics.plant import EnginePlant
+from app.sim.mission_profiles import MissionProfile
+from app.twin.digital_twin import DigitalTwin
+from app.twin.residual_analysis import ResidualMonitor
 
-FAULT_SUBSYSTEMS: dict[str, list[str]] = {
-    "misfire": ["cylinder"],
-    "spark_degradation": ["cylinder"],
-    "piston_ring_wear": ["cylinder", "lubrication"],
-    "bearing_wear": ["lubrication"],
-    "oil_pump_degradation": ["lubrication"],
-    "cooling_degradation": ["cooling"],
-    "fuel_injector_clog": ["fuel"],
-    "turbo_wear": ["turbo"],
-    "air_filter_clog": ["turbo", "fuel"],
-}
+logger = logging.getLogger(__name__)
 
-CYLINDER_SPECIFIC_FAULTS = {"misfire", "spark_degradation", "fuel_injector_clog"}
-
-SUBSYSTEM_KEYS = ["cylinder", "lubrication", "cooling", "fuel", "turbo"]
+INTERNAL_DT_S = 0.02  # fixed 20 ms integration sub-step
 
 
 @dataclass
-class FaultState:
-    type: str
-    severity: float = 0.0
-    target_severity: float = 0.0
-    ramp_seconds: float = 15.0
-    clearing: bool = False
-    started_at: float = field(default_factory=time.time)
-    cylinder_index: int = 0
+class DiagnosticSnapshot:
+    """Everything the PHM layer inferred this tick.
 
-    def step(self, dt: float) -> None:
-        if self.ramp_seconds <= 0:
-            self.severity = self.target_severity
-            return
-        rate = 1.0 / self.ramp_seconds
-        if self.severity < self.target_severity:
-            self.severity = min(self.target_severity, self.severity + rate * dt)
-        elif self.severity > self.target_severity:
-            self.severity = max(self.target_severity, self.severity - rate * dt)
+    The TelemetryFrame schema is frozen, so the classifier's opinion is exposed through
+    GET /twin/diagnosis instead of being forced into the WebSocket contract."""
 
-    @property
-    def is_settled(self) -> bool:
-        return abs(self.severity - self.target_severity) < 1e-4
+    residual_z: dict[str, float] = field(default_factory=dict)
+    residual_mean: dict[str, float] = field(default_factory=dict)
+    flagged_channels: list[str] = field(default_factory=list)
+    anomaly_scores: dict[str, float] = field(default_factory=dict)
+    predicted_fault: str = "healthy"
+    prediction_confidence: float = 0.0
+    classifier_available: bool = False
+    rul_subsystem: str | None = None
+    rul_model: str = "stable"
+    twin_channels: dict[str, float] = field(default_factory=dict)
+    real_channels: dict[str, float] = field(default_factory=dict)
 
 
 class SimulationLoop:
-    """Owns all mutable mock-sim state. Not thread-safe by design — intended to be
-    driven by a single asyncio task (see app/main.py) and mutated via its public
-    methods from HTTP control handlers running in the same event loop."""
+    """Owns all mutable simulation state.
 
-    def __init__(self) -> None:
-        self._t0 = time.time()
-        self.sim_time = 0.0
-        self.phase_index = 0
-        self.phase_elapsed = 0.0
-        self.altitude_m = BASE_ALTITUDE_M
-        self.throttle = 0.8
-        self.time_scale = 1.0
-        self.active_faults: dict[str, FaultState] = {}
-        self._subsystem_scores = {k: 100.0 for k in SUBSYSTEM_KEYS}
+    Driven by a single asyncio task and mutated from HTTP control handlers running on the
+    same event loop, so no locking is required."""
+
+    def __init__(self, params: EngineParams = PARAMS) -> None:
+        self.p = params
+
+        self.plant = EnginePlant(params, seed=7)
+        self.twin = DigitalTwin(params, seed=101)
+        self.mission = MissionProfile()
+        self.faults = FaultState()
+
+        self.residuals = ResidualMonitor()
+        self.anomaly = AnomalyDetector()
+        self.rul = RULPredictor()
+        self.reliability = MissionReliabilityModel()
+        self.classifier = FaultClassifier()
+
+        self.sim_time_s: float = 0.0
+        self.time_scale: float = 1.0
+        self.manual_throttle: float | None = None
+        self.throttle: float = self.mission.commanded_throttle()
+
         self._latest: TelemetryFrame | None = None
-        self._rng = random.Random(42)
+        self.diagnostics = DiagnosticSnapshot()
 
-    # ---- control surface -------------------------------------------------
+        self.plant.reset(self.mission.altitude_m)
+        self.twin.reset(self.mission.altitude_m)
+
+    # ---- control surface -----------------------------------------------------
 
     def set_throttle(self, value: float) -> None:
-        self.throttle = max(0.0, min(1.0, value))
+        """Pin the throttle manually, overriding the mission profile's command."""
+        self.manual_throttle = max(0.0, min(1.0, value))
+        # Reflect it immediately so a control response does not report the stale value
+        # from the previous tick.
+        self.throttle = self.manual_throttle
+
+    def release_throttle(self) -> None:
+        self.manual_throttle = None
 
     def set_time_scale(self, factor: float) -> None:
         self.time_scale = max(0.1, min(50.0, factor))
 
-    def jump_phase(self, phase: MissionPhase) -> None:
-        if phase in PHASE_ORDER:
-            self.phase_index = PHASE_ORDER.index(phase)
-            self.phase_elapsed = 0.0
+    def jump_phase(self, phase: str) -> None:
+        self.mission.jump_to(phase)  # type: ignore[arg-type]
 
     def inject_fault(self, fault_type: str, severity: float, ramp_seconds: float) -> None:
-        severity = max(0.0, min(1.0, severity))
-        existing = self.active_faults.get(fault_type)
-        cyl_idx = existing.cylinder_index if existing else self._rng.randrange(NUM_CYLINDERS)
-        started_at = existing.started_at if existing else time.time()
-        self.active_faults[fault_type] = FaultState(
-            type=fault_type,
-            severity=existing.severity if existing else 0.0,
-            target_severity=severity,
-            ramp_seconds=max(0.5, ramp_seconds),
-            clearing=False,
-            started_at=started_at,
-            cylinder_index=cyl_idx,
+        self.faults.inject(
+            fault_type,
+            severity,
+            ramp_seconds,
+            now=time.time(),
+            n_cylinders=self.p.n_cylinders,
         )
 
-    def clear_fault(self, fault_type: str) -> None:
-        existing = self.active_faults.get(fault_type)
-        if existing is None:
-            return
-        existing.target_severity = 0.0
-        existing.clearing = True
-        existing.ramp_seconds = max(0.5, existing.ramp_seconds)
+    def clear_fault(self, fault_type: str, ramp_seconds: float = 8.0) -> None:
+        self.faults.clear(fault_type, ramp_seconds)
 
-    # ---- tick ---------------------------------------------------------
+    @property
+    def active_faults(self) -> dict[str, float]:
+        return self.faults.active()
 
-    def tick(self, real_dt: float) -> TelemetryFrame:
-        dt = real_dt * self.time_scale
-        self.sim_time += dt
+    # ---- main tick -----------------------------------------------------------
 
-        profile_key = PHASE_ORDER[self.phase_index]
-        profile = PHASE_PROFILES[profile_key]
-        self.phase_elapsed += dt
-        if self.phase_elapsed >= profile.duration_s:
-            self.phase_elapsed = 0.0
-            self.phase_index = (self.phase_index + 1) % len(PHASE_ORDER)
-            profile_key = PHASE_ORDER[self.phase_index]
-            profile = PHASE_PROFILES[profile_key]
+    def tick(self, wall_dt_s: float) -> TelemetryFrame:
+        sim_dt_total = max(1e-4, wall_dt_s) * self.time_scale
+        n_substeps = max(1, int(round(sim_dt_total / INTERNAL_DT_S)))
+        dt = sim_dt_total / n_substeps
 
-        # advance fault ramps, drop fully-cleared faults
-        for ft in list(self.active_faults.keys()):
-            fs = self.active_faults[ft]
-            fs.step(dt)
-            if fs.clearing and fs.is_settled and fs.severity <= 1e-4:
-                del self.active_faults[ft]
+        for _ in range(n_substeps):
+            self.faults.step(dt)
+            self.mission.step(dt)
+            self.sim_time_s += dt
 
-        throttle_factor = 0.4 + 0.6 * self.throttle
-        t = self.sim_time
-        noise = self._rng.gauss
+            throttle = (
+                self.manual_throttle
+                if self.manual_throttle is not None
+                else self.mission.commanded_throttle()
+            )
+            self.throttle = throttle
+            altitude = self.mission.altitude_m
+            airspeed = self.mission.airspeed_ms
 
-        rpm = profile.rpm * throttle_factor + 35 * math.sin(t * 0.9) + noise(0, 12)
-        manifold_kpa = profile.manifold_kpa * throttle_factor + 3 * math.sin(t * 0.7) + noise(0, 1.2)
-        boost_kpa = profile.boost_kpa * throttle_factor + 4 * math.sin(t * 0.6 + 1) + noise(0, 1.5)
-        cht_c = profile.cht_c + 4 * math.sin(t * 0.15) + noise(0, 0.8)
-        oil_temp_c = profile.oil_temp_c + 3 * math.sin(t * 0.12 + 0.5) + noise(0, 0.6)
-        oil_pressure_kpa = profile.oil_pressure_kpa * (0.85 + 0.15 * throttle_factor) + 6 * math.sin(t * 0.8) + noise(0, 3)
-        fuel_flow_lph = profile.fuel_flow_lph * throttle_factor + 0.6 * math.sin(t * 0.5) + noise(0, 0.3)
+            self.plant.substep(dt, throttle, altitude, airspeed, self.faults)
+            self.twin.substep(dt, throttle, altitude, airspeed)
 
-        self.altitude_m = max(0.0, self.altitude_m + profile.altitude_rate_m_s * dt + noise(0, 0.5))
-        airspeed_ms = profile.airspeed_ms + 1.5 * math.sin(t * 0.3) + noise(0, 0.4)
-
-        cylinders: list[CylinderReading] = []
-        for i in range(NUM_CYLINDERS):
-            phase_shift = (2 * math.pi / NUM_CYLINDERS) * i
-            egt = profile.egt_c + 10 * math.sin(t * 1.3 + phase_shift) + noise(0, 3)
-            base_vib = 0.12 + (rpm / 5500) * 0.10
-            vib = base_vib + 0.02 * math.sin(t * 2.1 + phase_shift) + abs(noise(0, 0.015))
-            cylinders.append(CylinderReading(id=i + 1, egt_c=egt, vibration_rms=vib))
-
-        # ---- fault effects -------------------------------------------------
-        subsystem_penalty = {k: 0.0 for k in SUBSYSTEM_KEYS}
-        active_fault_models = list(self.active_faults.values())
-        worst_severity = 0.0
-
-        for fs in active_fault_models:
-            s = fs.severity
-            if s <= 1e-4:
-                continue
-            worst_severity = max(worst_severity, s)
-            for sub in FAULT_SUBSYSTEMS[fs.type]:
-                subsystem_penalty[sub] += s * 80
-
-            if fs.type == "misfire":
-                flicker = self._rng.uniform(0.5, 1.0)
-                c = cylinders[fs.cylinder_index]
-                c.egt_c -= s * 150 * flicker
-                c.vibration_rms += s * 0.6 * self._rng.uniform(0.4, 1.0)
-                fuel_flow_lph += s * 2
-            elif fs.type == "spark_degradation":
-                c = cylinders[fs.cylinder_index]
-                c.egt_c += s * 80
-                c.vibration_rms += s * 0.25
-                fuel_flow_lph += s * 1
-            elif fs.type == "piston_ring_wear":
-                oil_pressure_kpa -= s * 90
-                oil_temp_c += s * 15
-                for c in cylinders:
-                    c.egt_c += s * 15
-                    c.vibration_rms += s * 0.12
-            elif fs.type == "bearing_wear":
-                oil_pressure_kpa -= s * 120
-                oil_temp_c += s * 10
-                for c in cylinders:
-                    c.vibration_rms += s * 0.8
-            elif fs.type == "oil_pump_degradation":
-                oil_pressure_kpa -= s * 180
-                oil_temp_c += s * 20
-                for c in cylinders:
-                    c.vibration_rms += s * 0.15
-            elif fs.type == "cooling_degradation":
-                cht_c += s * 55
-                oil_temp_c += s * 10
-                for c in cylinders:
-                    c.egt_c += s * 20
-            elif fs.type == "fuel_injector_clog":
-                c = cylinders[fs.cylinder_index]
-                c.egt_c += s * 60
-                c.vibration_rms += s * 0.15
-                fuel_flow_lph -= s * 3
-            elif fs.type == "turbo_wear":
-                boost_kpa -= s * 50
-                manifold_kpa -= s * 20
-                for c in cylinders:
-                    c.egt_c += s * 25
-                    c.vibration_rms += s * 0.1
-            elif fs.type == "air_filter_clog":
-                manifold_kpa -= s * 25
-                boost_kpa -= s * 30
-                fuel_flow_lph -= s * 2
-                for c in cylinders:
-                    c.egt_c += s * 15
-
-        oil_pressure_kpa = max(20.0, oil_pressure_kpa)
-        fuel_flow_lph = max(0.5, fuel_flow_lph)
-        boost_kpa = max(0.0, boost_kpa)
-        manifold_kpa = max(10.0, manifold_kpa)
-
-        # ---- health scores --------------------------------------------------
-        for k in SUBSYSTEM_KEYS:
-            target = max(5.0, 100.0 - subsystem_penalty[k])
-            drift = noise(0, 0.15)
-            current = self._subsystem_scores[k]
-            # move toward target at a bounded rate so recoveries/degradations feel smooth
-            step = max(-6.0, min(6.0, target - current))
-            self._subsystem_scores[k] = max(0.0, min(100.0, current + step * 0.5 + drift))
-
-        subsystem_scores = dict(self._subsystem_scores)
-        worst_subsystem = min(subsystem_scores.values())
-        avg_subsystem = sum(subsystem_scores.values()) / len(subsystem_scores)
-        overall_score = max(0.0, min(100.0, worst_subsystem * 0.6 + avg_subsystem * 0.4))
-
-        rul_minutes: float | None = None
-        if worst_severity > 0.02 or overall_score < 94.5:
-            decay = max(worst_severity, (95.0 - overall_score) / 95.0)
-            rul_minutes = max(0.0, 180.0 * (1.0 - decay) ** 1.5)
-
-        reliability_score = max(
-            0.0,
-            min(1.0, 1.0 - worst_severity * 0.9 - (100.0 - overall_score) / 200.0),
+        # ---- once-per-tick PHM chain ----------------------------------------
+        real_state = self.plant.finalise_tick()
+        comparison = self.twin.compare(real_state)
+        report = self.residuals.update(comparison.residuals, dt_s=sim_dt_total)
+        anomaly: AnomalyReport = self.anomaly.update(report, dt_s=sim_dt_total)
+        rul_estimate = self.rul.update(self.sim_time_s, anomaly.health_indicators)
+        reliability = self.reliability.evaluate(
+            rul_minutes=rul_estimate.minutes,
+            mission_remaining_s=self.mission.remaining_seconds(),
+            overall_health=anomaly.overall_health,
         )
-        if reliability_score > 0.75:
-            recommendation = "GO"
-        elif reliability_score > 0.4:
-            recommendation = "CAUTION"
-        else:
-            recommendation = "NO-GO"
 
-        active_faults_out = [
-            ActiveFault(type=fs.type, severity=round(fs.severity, 4), started_at=fs.started_at)
-            for fs in active_fault_models
-            if fs.severity > 1e-4
+        diagnosis: Diagnosis = self.classifier.predict(self.residuals.feature_vector())
+
+        self.diagnostics = DiagnosticSnapshot(
+            residual_z={c: report.z(c) for c in report.stats},
+            residual_mean={c: report.mean(c) for c in report.stats},
+            flagged_channels=anomaly.flagged_channels,
+            anomaly_scores=anomaly.anomaly_scores,
+            predicted_fault=diagnosis.predicted_fault,
+            prediction_confidence=diagnosis.confidence,
+            classifier_available=diagnosis.model_available,
+            rul_subsystem=rul_estimate.subsystem,
+            rul_model=rul_estimate.model,
+            twin_channels=comparison.twin.channels(),
+            real_channels=comparison.real.channels(),
+        )
+
+        # ---- assemble the frame (schema identical to Phase 1) ----------------
+        cylinders = [
+            CylinderReading(
+                id=i + 1,
+                egt_c=round(real_state.egt_c[i], 1),
+                vibration_rms=round(max(0.0, real_state.vibration_rms[i]), 4),
+            )
+            for i in range(len(real_state.egt_c))
+        ]
+
+        active = [
+            ActiveFault(
+                type=ft,  # type: ignore[arg-type]
+                severity=round(sev, 4),
+                started_at=self.faults.started_at.get(ft, time.time()),
+            )
+            for ft, sev in self.faults.active().items()
         ]
 
         frame = TelemetryFrame(
             timestamp=time.time(),
-            mission_phase=profile_key,
-            rpm=round(rpm, 1),
-            manifold_pressure_kpa=round(manifold_kpa, 2),
-            boost_pressure_kpa=round(boost_kpa, 2),
-            cylinders=[
-                CylinderReading(
-                    id=c.id, egt_c=round(c.egt_c, 1), vibration_rms=round(max(0.0, c.vibration_rms), 4)
-                )
-                for c in cylinders
-            ],
-            cht_c=round(cht_c, 1),
-            oil_temp_c=round(oil_temp_c, 1),
-            oil_pressure_kpa=round(oil_pressure_kpa, 1),
-            fuel_flow_lph=round(fuel_flow_lph, 2),
-            altitude_m=round(self.altitude_m, 1),
-            airspeed_ms=round(max(0.0, airspeed_ms), 1),
+            mission_phase=self.mission.phase,
+            rpm=round(real_state.rpm, 1),
+            manifold_pressure_kpa=round(real_state.manifold_pressure_kpa, 2),
+            boost_pressure_kpa=round(real_state.boost_pressure_kpa, 2),
+            cylinders=cylinders,
+            cht_c=round(real_state.cht_c, 1),
+            oil_temp_c=round(real_state.oil_temp_c, 1),
+            oil_pressure_kpa=round(real_state.oil_pressure_kpa, 1),
+            fuel_flow_lph=round(real_state.fuel_flow_lph, 2),
+            altitude_m=round(self.mission.altitude_m, 1),
+            airspeed_ms=round(self.mission.airspeed_ms, 1),
             health=HealthState(
-                overall_score=round(overall_score, 1),
-                subsystem_scores=subsystem_scores,  # type: ignore[arg-type]
+                overall_score=round(anomaly.overall_health, 1),
+                subsystem_scores=SubsystemScores(
+                    **{k: round(v, 1) for k, v in anomaly.health_indicators.items()}
+                ),
             ),
-            rul_minutes=round(rul_minutes, 1) if rul_minutes is not None else None,
+            rul_minutes=(
+                round(rul_estimate.minutes, 1) if rul_estimate.minutes is not None else None
+            ),
             mission_reliability=MissionReliability(
-                score=round(reliability_score, 3), recommendation=recommendation
+                score=round(reliability.score, 3),
+                recommendation=reliability.recommendation,  # type: ignore[arg-type]
             ),
-            active_faults=active_faults_out,
+            active_faults=active,
         )
         self._latest = frame
         return frame
 
     def get_latest(self) -> TelemetryFrame | None:
         return self._latest
+
+
+async def run_simulation(app) -> None:
+    """Background task: tick the simulation and broadcast frames at the configured rate."""
+    from app.api import ws_telemetry
+
+    sim: SimulationLoop = app.state.sim
+    last = time.perf_counter()
+    while True:
+        await asyncio.sleep(settings.tick_seconds)
+        now = time.perf_counter()
+        wall_dt = now - last
+        last = now
+        try:
+            frame = sim.tick(wall_dt)
+        except Exception:
+            logger.exception("Simulation tick failed")
+            continue
+        await ws_telemetry.manager.broadcast_json(frame.model_dump())
