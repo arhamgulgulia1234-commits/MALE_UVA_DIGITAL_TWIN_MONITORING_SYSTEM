@@ -16,7 +16,22 @@ import type {
 
 export const BUFFER_SIZE = 600; // 60s @ 10Hz
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+/**
+ * Backend base URL. Upgraded to https when the page is secure, for the same
+ * mixed-content reason the WebSocket is — a plain-http fetch from an https page is
+ * blocked outright.
+ */
+function resolveApiUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  if (typeof window !== "undefined" && window.location.protocol === "https:") {
+    if (configured.startsWith("http://")) {
+      return `https://${configured.slice("http://".length)}`;
+    }
+  }
+  return configured;
+}
+
+const API_URL = resolveApiUrl();
 
 interface TelemetryStore {
   status: ConnectionStatus;

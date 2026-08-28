@@ -14,6 +14,21 @@ interface ReconnectingSocketOptions<T> {
   maxBackoffMs?: number;
 }
 
+/**
+ * Force `wss://` when the page itself is served over HTTPS.
+ *
+ * A browser silently blocks an insecure WebSocket opened from a secure page — the
+ * connection fails with no useful error, and it looks exactly like the backend being
+ * down. That is the single most common way a Vercel + Render style split deployment
+ * fails, and it is entirely avoidable: if the page is secure, the socket must be too.
+ */
+export function normalizeWebSocketUrl(url: string): string {
+  if (typeof window === "undefined") return url;
+  if (window.location.protocol !== "https:") return url;
+  if (url.startsWith("ws://")) return `wss://${url.slice("ws://".length)}`;
+  return url;
+}
+
 export class ReconnectingSocket<T = unknown> {
   private ws: WebSocket | null = null;
   private url: string;
@@ -25,7 +40,7 @@ export class ReconnectingSocket<T = unknown> {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: ReconnectingSocketOptions<T>) {
-    this.url = opts.url;
+    this.url = normalizeWebSocketUrl(opts.url);
     this.onMessage = opts.onMessage;
     this.onStatusChange = opts.onStatusChange;
     this.maxBackoffMs = opts.maxBackoffMs ?? 8000;

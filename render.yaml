@@ -1,0 +1,29 @@
+# Render blueprint for the backend.
+#
+# The frontend is deployed separately on Vercel — see docs/deployment-hosting.md for how
+# the two are wired together.
+#
+# Render injects $PORT and expects the process to bind to it; backend/Dockerfile does.
+services:
+  - type: web
+    name: sih26054-engine-twin-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    # Free tier works for a demo but spins down after ~15 min idle. See the doc for what
+    # that does to a live WebSocket.
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      # Set this to your Vercel domain(s), comma-separated. No trailing slash.
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SIM_TICK_HZ
+        value: "10"
+      - key: USE_MOCK
+        value: "false"
+      # Optional bearer-token auth. Leave disabled for an open demo.
+      - key: TELEMETRY_AUTH_ENABLED
+        value: "false"
+      - key: TELEMETRY_TOKEN
+        sync: false
