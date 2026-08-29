@@ -23,6 +23,7 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { formatRul } from "@/lib/format";
 import { useTestBenchStore } from "@/lib/testbench/store";
 import type { LimitExcursion, ScenarioResult, Verdict } from "@/lib/testbench/types";
+import type { RecoveryRecommendation } from "@/lib/types";
 
 const VERDICT_STYLE: Record<
   Verdict,
@@ -51,6 +52,14 @@ const VERDICT_STYLE: Record<
   },
 };
 
+/** Phase 5: recovery_reliability's own pill tone, kept separate from VERDICT_STYLE so
+ * the two readouts never share a lookup that could make them drift in step. */
+const RECOVERY_TONE: Record<RecoveryRecommendation, "go" | "caution" | "nogo"> = {
+  "RTB-SAFE": "go",
+  "RTB-CAUTION": "caution",
+  "RTB-AT-RISK": "nogo",
+};
+
 const PARAMETER_LABEL: Record<string, string> = {
   cht_c: "Cylinder head temp",
   egt_c: "Exhaust gas temp",
@@ -67,7 +76,10 @@ const TEMP_SERIES: SeriesDef[] = [
 
 const HEALTH_SERIES: SeriesDef[] = [
   { key: "health", color: "#22d3a8", label: "Overall Health", yAxisId: "left" },
-  { key: "reliability", color: "#3fd0e0", label: "Reliability ×100", yAxisId: "left" },
+  { key: "reliability", color: "#3fd0e0", label: "Mission Reliability ×100", yAxisId: "left" },
+  // Phase 5: recovery_reliability, in amber so it reads as its own thing next to
+  // mission reliability's cyan rather than a shade of the same series.
+  { key: "recovery", color: "#f5a623", label: "Recovery Reliability ×100", yAxisId: "left" },
   { key: "oil_p", color: "#c084fc", label: "Oil Press. (kPa)", yAxisId: "right" },
 ];
 
@@ -194,6 +206,17 @@ export function ScenarioResultsView() {
           </StatusPill>
           <span className="text-[10px] text-slate-500">
             Ends {summary.final_recommendation}
+          </span>
+        </div>
+        {/* Phase 5: recovery reliability gets its own pill, deliberately not folded into
+            the verdict above — it answers "could it have gotten home," not "did it
+            finish the plan," and the two can legitimately disagree throughout the run. */}
+        <div className="flex flex-col items-end gap-1">
+          <StatusPill tone={RECOVERY_TONE[summary.worst_recovery_recommendation]}>
+            Worst recovery: {summary.worst_recovery_recommendation}
+          </StatusPill>
+          <span className="text-[10px] text-slate-500">
+            Ends {summary.final_recovery_recommendation}
           </span>
         </div>
       </div>
@@ -402,6 +425,10 @@ function buildCharts(result: ScenarioResult | null): {
     t: Math.round((f.timestamp / 60) * 100) / 100,
     health: f.health.overall_score,
     reliability: Math.round(f.mission_reliability.score * 1000) / 10,
+    // Optional on TelemetryFrame for backward compatibility with frames from before
+    // this field existed (see lib/types.ts); a scenario always populates it, but a
+    // saved run replayed from an older schema version should not crash the chart.
+    recovery: Math.round((f.recovery_reliability?.score ?? 0) * 1000) / 10,
     oil_p: f.oil_pressure_kpa,
   }));
 

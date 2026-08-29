@@ -75,7 +75,7 @@ def run_episode(
 
     for _ in range(HEALTHY_SAMPLE_TICKS):
         sim.tick(0.1)
-        features.append(sim.residuals.feature_vector())
+        features.append(sim.residuals.feature_vector() + sim.fusion_stats.feature_vector())
         labels.append(HEALTHY_LABEL)
 
     severity = rng.uniform(0.35, 1.0)
@@ -94,7 +94,7 @@ def run_episode(
         sim.tick(0.1)
         if severity_of(fault_type) < AMBIGUOUS_BELOW:
             continue
-        features.append(sim.residuals.feature_vector())
+        features.append(sim.residuals.feature_vector() + sim.fusion_stats.feature_vector())
         labels.append(fault_type)
 
     return features, labels

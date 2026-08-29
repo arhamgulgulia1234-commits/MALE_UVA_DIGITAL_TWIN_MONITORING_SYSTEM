@@ -17,15 +17,31 @@ each feature actually took on this sample. A globally-important feature sitting 
 did not contribute to *this* prediction, and reporting it as the reason would be
 misleading.
 
-**Physical vs sensor disambiguation.** This is the structural insight: a real physical
-fault propagates. Bearing wear drops oil pressure *and* raises vibration *and* raises oil
-temperature, because those channels are physically coupled through the same mechanism. A
-sensor fault does not propagate — a drifting EGT probe moves the EGT channel and leaves
-every physically linked channel exactly where the twin predicted. So rather than asking
-the classifier to learn the difference from labels alone, we check the *correlation
-structure* directly: count how many of a channel's physical neighbours moved with it. One
-channel shouting alone is instrumentation; a whole coupled group moving together is
-mechanical.
+**Physical vs sensor disambiguation, two layers.** The structural insight underneath both:
+a real physical fault propagates and a sensor fault does not. Bearing wear drops oil
+pressure *and* raises vibration *and* raises oil temperature, because those channels are
+physically coupled through the same mechanism; a drifting EGT probe moves the EGT channel
+and leaves every physically linked channel exactly where the twin predicted.
+
+For CHT, RPM and oil pressure — the three channels `app/fusion/` builds a Kalman fusion
+for — that insight now has a direct, quantitative answer instead of an inferred one:
+`_classify_fused_channels` reads each channel's fusion innovations straight from
+`app/fusion/fusion_monitor.py`. A sensor fault on a fused channel shows up as a large,
+sustained innovation isolated to *one* of its two sources while the other tracks the
+fused estimate normally; a genuine physical fault shows innovations that are broadly
+consistent with the physics instead (real bearing wear degrades the oil-pressure model's
+own prediction confidence — its Kalman gain shifting toward the sensor — which is a
+different shape of evidence than one sensor lying while the model and the other sensor
+agree). This has to run independently of, and before, the correlation check below: fusion
+is specifically built to keep the *fused* channel's residual against the twin looking
+normal even while one of its two sources is lying, which means waiting for that channel
+to become the "loudest moved" residual — the correlation heuristic's own trigger — would
+miss precisely the case this layer exists to catch.
+
+Every other channel (EGT, fuel, battery, ...) has no fusion built for it, so
+`_classify_correlation` keeps doing exactly what it always has: count how many of a
+channel's physical neighbours moved with it. One channel shouting alone is
+instrumentation; a whole coupled group moving together is mechanical.
 """
 from __future__ import annotations
 
@@ -95,6 +111,11 @@ class Diagnosis:
     explanation: list[ExplanationFeature] = field(default_factory=list)
     #: Human-readable justification for the source call.
     source_rationale: str = ""
+    #: Phase 5: which specific probe/instrument the fusion disambiguation named, e.g.
+    #: "cht_sensor_secondary" or "rpm_tachometer" — set only when `predicted_source` is
+    #: "sensor_fault" *and* the fault landed on one of the three fused channels, where a
+    #: specific instrument can actually be named rather than a general subsystem.
+    suspect_sensor: str | None = None
 
     def explanation_dicts(self) -> list[dict]:
         return [e.to_dict() for e in self.explanation]
@@ -225,11 +246,165 @@ class FaultClassifier:
     # ---- physical vs sensor ------------------------------------------------
 
     def classify_source(
-        self, residual_z: dict[str, float]
-    ) -> tuple[str, str]:
+        self,
+        residual_z: dict[str, float],
+        fusion_z: dict[str, float] | None = None,
+    ) -> tuple[str, str, str | None]:
         """Decide whether an anomaly came from the machine or the instrument.
 
-        Returns (source, rationale)."""
+        Checks the three fused channels first (they can hide a sensor fault from their
+        own twin-residual entirely — see the module docstring — so their own innovation
+        signals have to be consulted directly, not discovered via the correlation
+        check below), then falls back to the general correlation heuristic for
+        everything else.
+
+        Returns (source, rationale, suspect_sensor). `suspect_sensor` is set only when a
+        fused channel named a specific instrument."""
+        fused = self._classify_fused_channels(fusion_z or {}, residual_z)
+        if fused is not None:
+            return fused
+
+        source, rationale = self._classify_correlation(residual_z)
+        return source, rationale, None
+
+    def _classify_fused_channels(
+        self, fusion_z: dict[str, float], residual_z: dict[str, float]
+    ) -> tuple[str, str, str | None] | None:
+        """Fusion-innovation disambiguation for CHT, RPM and oil pressure.
+
+        Returns `None` when none of the three fused channels shows anything worth
+        calling — the caller then falls through to the correlation heuristic for
+        whatever channel actually moved."""
+        cht = self._classify_cht(fusion_z)
+        if cht is not None:
+            return cht
+        rpm = self._classify_rpm(fusion_z, residual_z)
+        if rpm is not None:
+            return rpm
+        oil = self._classify_oil_pressure(fusion_z)
+        if oil is not None:
+            return oil
+        return None
+
+    @staticmethod
+    def _classify_cht(fusion_z: dict[str, float]) -> tuple[str, str, str | None] | None:
+        primary = fusion_z.get("cht_innovation_primary", 0.0)
+        secondary = fusion_z.get("cht_innovation_secondary", 0.0)
+        primary_moved = primary >= CHANNEL_MOVED_Z
+        secondary_moved = secondary >= CHANNEL_MOVED_Z
+
+        if primary_moved and not secondary_moved:
+            return (
+                "sensor_fault",
+                f"CHT primary probe disagrees with the fused estimate (z={primary:.1f}) "
+                f"while the secondary probe tracks it normally (z={secondary:.1f}) — a "
+                f"real cylinder-head temperature change would move both",
+                "cht_sensor_primary",
+            )
+        if secondary_moved and not primary_moved:
+            return (
+                "sensor_fault",
+                f"CHT secondary probe disagrees with the fused estimate (z={secondary:.1f}) "
+                f"while the primary probe tracks it normally (z={primary:.1f}) — a real "
+                f"cylinder-head temperature change would move both",
+                "cht_sensor_secondary",
+            )
+        if primary_moved and secondary_moved:
+            return (
+                "physical_fault",
+                f"both CHT probes disagree with the fused estimate together "
+                f"(primary z={primary:.1f}, secondary z={secondary:.1f}) — consistent "
+                f"with the true cylinder head temperature actually moving",
+                None,
+            )
+        return None
+
+    @staticmethod
+    def _classify_rpm(
+        fusion_z: dict[str, float], residual_z: dict[str, float]
+    ) -> tuple[str, str, str | None] | None:
+        tach = fusion_z.get("rpm_innovation_tachometer", 0.0)
+        vib = fusion_z.get("rpm_innovation_vibration_derived", 0.0)
+        tach_moved = tach >= CHANNEL_MOVED_Z
+        vib_moved = vib >= CHANNEL_MOVED_Z
+        if not tach_moved and not vib_moved:
+            return None
+
+        # Independent corroboration named in the task itself: real vibration RMS,
+        # untouched by this fusion pair (it only ever reads a dominant *frequency*, not
+        # RMS amplitude), is elevated only when something mechanical is actually
+        # happening — a wrong estimate from a bad tachometer would not raise it.
+        vib_rms_elevated = (
+            residual_z.get("vibration_rms_mean", 0.0) >= CHANNEL_MOVED_Z
+            or residual_z.get("vibration_rms_max", 0.0) >= CHANNEL_MOVED_Z
+        )
+
+        if tach_moved and not vib_moved:
+            return (
+                "sensor_fault",
+                f"tachometer RPM disagrees with the fused estimate (z={tach:.1f}) while "
+                f"the vibration-derived estimate tracks it normally (z={vib:.1f}) — "
+                f"consistent with a stuck or corrupted RPM sensor",
+                "rpm_tachometer",
+            )
+        if vib_moved and not tach_moved:
+            if vib_rms_elevated:
+                return (
+                    "physical_fault",
+                    f"vibration-derived RPM disagrees with the tachometer (z={vib:.1f}) "
+                    f"and cylinder vibration RMS is independently elevated — consistent "
+                    f"with a real mechanical issue affecting the vibration spectrum, not "
+                    f"a wrong estimate",
+                    None,
+                )
+            return (
+                "uncertain",
+                f"vibration-derived RPM disagrees with the tachometer (z={vib:.1f}) but "
+                f"vibration RMS is not independently elevated — inconclusive",
+                None,
+            )
+        # both moved together
+        return (
+            "physical_fault",
+            f"tachometer and vibration-derived RPM disagree with the fused estimate "
+            f"together (tach z={tach:.1f}, vibration z={vib:.1f}) — consistent with the "
+            f"true crankshaft speed actually moving",
+            None,
+        )
+
+    @staticmethod
+    def _classify_oil_pressure(
+        fusion_z: dict[str, float]
+    ) -> tuple[str, str, str | None] | None:
+        innovation = fusion_z.get("oil_pressure_innovation", 0.0)
+        if innovation < CHANNEL_MOVED_Z:
+            return None
+        gain_shift = fusion_z.get("oil_pressure_gain_deviation", 0.0)
+        if gain_shift >= CHANNEL_MOVED_Z:
+            return (
+                "physical_fault",
+                f"oil pressure disagrees with the zero-wear model prediction "
+                f"(z={innovation:.1f}) *and* the Kalman gain has shifted toward "
+                f"trusting the sensor (z={gain_shift:.1f}) — the model's own prediction "
+                f"confidence degrading is consistent with real lubrication wear",
+                None,
+            )
+        return (
+            "sensor_fault",
+            f"oil pressure disagrees with the zero-wear model prediction "
+            f"(z={innovation:.1f}) while the model's prediction confidence has not "
+            f"moved (gain z={gain_shift:.1f}) — consistent with a lying sensor rather "
+            f"than real degradation",
+            "oil_pressure_sensor",
+        )
+
+    def _classify_correlation(
+        self, residual_z: dict[str, float]
+    ) -> tuple[str, str]:
+        """The original Phase 3 heuristic: do physically-linked channels move together?
+
+        Still the only disambiguation available for every channel Part B did not build a
+        fusion pair for (EGT, fuel, battery, ...)."""
         moved = {
             ch: z for ch, z in residual_z.items() if z >= CHANNEL_MOVED_Z
         }
@@ -278,9 +453,12 @@ class FaultClassifier:
         self,
         features: list[float],
         residual_z: dict[str, float] | None = None,
+        fusion_z: dict[str, float] | None = None,
     ) -> Diagnosis:
-        source, rationale = (
-            self.classify_source(residual_z) if residual_z else ("uncertain", "")
+        source, rationale, suspect_sensor = (
+            self.classify_source(residual_z, fusion_z)
+            if residual_z
+            else ("uncertain", "", None)
         )
 
         if self._model is None:
@@ -291,6 +469,7 @@ class FaultClassifier:
                 model_available=False,
                 predicted_source=source,
                 source_rationale=rationale,
+                suspect_sensor=suspect_sensor,
             )
 
         try:
@@ -304,6 +483,7 @@ class FaultClassifier:
                 model_available=True,
                 predicted_source=source,
                 source_rationale=rationale,
+                suspect_sensor=suspect_sensor,
             )
 
         probabilities = {str(cls): float(p) for cls, p in zip(self._classes, proba)}
@@ -321,13 +501,27 @@ class FaultClassifier:
                 predicted_source=source,
                 explanation=explanation,
                 source_rationale=rationale,
+                suspect_sensor=suspect_sensor,
             )
 
-        # If the model itself named a sensor fault, that outranks the correlation
-        # heuristic — the heuristic is a fallback for when the model is unsure.
-        if best_label.endswith("_sensor_drift") or "sensor" in best_label:
+        # If the model itself named a sensor fault, that outranks the fused-channel and
+        # correlation heuristics — both are a fallback for when the model is unsure.
+        if best_label.endswith("_sensor_drift") or best_label.endswith(
+            "_sensor_noise"
+        ) or best_label.endswith("_sensor_stuck") or "sensor" in best_label:
             source = "sensor_fault"
             rationale = f"classifier identified {best_label} directly"
+            # The new per-probe classes name their instrument in the label itself
+            # (`cht_sensor_primary_drift` / `cht_sensor_secondary_drift`) — surface that
+            # the same way the fusion-based heuristic does, rather than leaving
+            # `suspect_sensor` at whatever (possibly unrelated) channel the heuristic
+            # had guessed before the model's own, more specific answer arrived.
+            if best_label.startswith("cht_sensor_"):
+                suspect_sensor = best_label.removesuffix("_drift")
+            elif best_label == "rpm_sensor_stuck":
+                suspect_sensor = "rpm_tachometer"
+            elif best_label == "oil_pressure_sensor_noise":
+                suspect_sensor = "oil_pressure_sensor"
 
         return Diagnosis(
             best_label,
@@ -337,4 +531,5 @@ class FaultClassifier:
             predicted_source=source,
             explanation=explanation,
             source_rationale=rationale,
+            suspect_sensor=suspect_sensor,
         )

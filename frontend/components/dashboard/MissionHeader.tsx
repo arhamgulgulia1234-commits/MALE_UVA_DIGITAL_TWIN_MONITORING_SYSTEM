@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { useTelemetryStore } from "@/lib/store";
 import type { ConnectionStatus } from "@/lib/websocket";
 import { formatClock } from "@/lib/format";
-import type { MissionPhase, Recommendation } from "@/lib/types";
+import type { MissionPhase, Recommendation, RecoveryRecommendation } from "@/lib/types";
 
 const PHASE_LABEL: Record<MissionPhase, string> = {
   climb: "Climb",
@@ -42,6 +42,47 @@ const RECOMMENDATION_STYLE: Record<
   },
 };
 
+/**
+ * Phase 5: recovery_reliability's badge, styled to never be mistaken for the mission-
+ * reliability one next to it even though they can share a color — a pill shape (the
+ * mission badge is a rectangle), its own icon, and the label text itself always reads
+ * "RTB-something" rather than a bare GO/CAUTION/NO-GO. RTB-AT-RISK additionally gets a
+ * ring the other two states don't, so the one state that must never be missed is
+ * structurally distinct, not just red — a viewer who cannot see color still gets it.
+ */
+const RECOVERY_STYLE: Record<
+  RecoveryRecommendation,
+  { bg: string; border: string; text: string; glow: string; pulse: boolean; icon: string; ring: string }
+> = {
+  "RTB-SAFE": {
+    bg: "bg-status-go/10",
+    border: "border-status-go/50",
+    text: "text-status-go",
+    glow: "shadow-glow-go",
+    pulse: false,
+    icon: "⌂",
+    ring: "",
+  },
+  "RTB-CAUTION": {
+    bg: "bg-status-amber/10",
+    border: "border-status-amber/50",
+    text: "text-status-amber",
+    glow: "shadow-glow-amber",
+    pulse: true,
+    icon: "⌂",
+    ring: "",
+  },
+  "RTB-AT-RISK": {
+    bg: "bg-status-red/15",
+    border: "border-status-red/70",
+    text: "text-status-red",
+    glow: "shadow-glow-red",
+    pulse: true,
+    icon: "⚠",
+    ring: "ring-2 ring-status-red/60 ring-offset-2 ring-offset-base-bg",
+  },
+};
+
 const CONN_LABEL: Record<ConnectionStatus, { label: string; tone: string }> = {
   connecting: { label: "Connecting", tone: "text-status-amber" },
   open: { label: "Live", tone: "text-status-go" },
@@ -61,8 +102,10 @@ export function MissionHeader() {
   }, [startedAt]);
 
   const recommendation = latest?.mission_reliability.recommendation ?? "GO";
+  const recoveryRecommendation = latest?.recovery_reliability?.recommendation ?? "RTB-SAFE";
   const isReplay = latest?.is_replay ?? false;
   const style = RECOMMENDATION_STYLE[recommendation];
+  const recoveryStyle = RECOVERY_STYLE[recoveryRecommendation];
   const conn = CONN_LABEL[status];
 
   return (
@@ -119,8 +162,37 @@ export function MissionHeader() {
                 style.glow,
                 style.pulse && "animate-pulseGlow"
               )}
+              title="Mission reliability — can it finish the rest of the planned mission?"
             >
               {recommendation}
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Phase 5: recovery reliability. A deliberately different question from the
+              badge above ("can it get back to base if we abort right now?"), so the two
+              can legitimately disagree — mission_reliability might read NO-GO for
+              continuing while this still reads RTB-SAFE, which is precisely the
+              life-saving distinction this second readout exists to show. */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={recoveryRecommendation}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ duration: 0.25 }}
+              className={clsx(
+                "flex items-center gap-1.5 rounded-full border px-4 py-1.5 font-display text-lg font-bold tracking-[0.1em]",
+                recoveryStyle.bg,
+                recoveryStyle.border,
+                recoveryStyle.text,
+                recoveryStyle.glow,
+                recoveryStyle.ring,
+                recoveryStyle.pulse && "animate-pulseGlow"
+              )}
+              title="Recovery reliability — can it safely get back to base if we abort right now?"
+            >
+              <span aria-hidden="true">{recoveryStyle.icon}</span>
+              {recoveryRecommendation}
             </motion.div>
           </AnimatePresence>
         </div>

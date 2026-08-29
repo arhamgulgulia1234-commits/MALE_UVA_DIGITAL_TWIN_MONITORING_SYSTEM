@@ -67,16 +67,50 @@ const SENSOR_BADGE_POSITION: Record<string, [number, number, number]> = {
   egt: [LAYOUT.cylinderStations[0], 0.55, LAYOUT.cylinderOuter + 0.1],
   oil: [-0.15, -0.72, -0.42],
   rpm: [LAYOUT.propHubX - 0.35, 0.42, 0],
+  // Phase 5: two independent mount points for the two independent CHT probes — placed
+  // on opposite cylinder stations, the way a real dual-probe installation would be.
+  cht_primary: [LAYOUT.cylinderStations[0], 0.3, LAYOUT.cylinderOuter + 0.1],
+  cht_secondary: [LAYOUT.cylinderStations[1], 0.3, LAYOUT.cylinderOuter + 0.1],
 };
 
 const SENSOR_BADGE_LABEL: Record<string, string> = {
   egt: "EGT probe",
   oil: "Oil pressure",
   rpm: "RPM pickup",
+  cht_primary: "CHT probe #1",
+  cht_secondary: "CHT probe #2",
 };
+
+/** Phase 5: the fused-channel innovation that justifies each badge, so it names what is
+ * wrong with the probe rather than just that something is. `null` entries (EGT, and any
+ * channel with no live innovation yet) fall back to the generic "suspect reading". */
+function fusionBadgeDetail(mount: string, frame: ReturnType<typeof useTelemetryStore.getState>["latest"]): string | null {
+  if (!frame) return null;
+  switch (mount) {
+    case "cht_primary":
+      return frame.cht_sensor_innovations
+        ? `disagrees with fused estimate by ${frame.cht_sensor_innovations.primary >= 0 ? "+" : ""}${frame.cht_sensor_innovations.primary.toFixed(1)}°C`
+        : null;
+    case "cht_secondary":
+      return frame.cht_sensor_innovations
+        ? `disagrees with fused estimate by ${frame.cht_sensor_innovations.secondary >= 0 ? "+" : ""}${frame.cht_sensor_innovations.secondary.toFixed(1)}°C`
+        : null;
+    case "rpm":
+      return frame.rpm_sensor_innovations
+        ? `tachometer off by ${frame.rpm_sensor_innovations.tachometer >= 0 ? "+" : ""}${frame.rpm_sensor_innovations.tachometer.toFixed(0)} rpm`
+        : null;
+    case "oil":
+      return frame.oil_pressure_innovation != null
+        ? `off model prediction by ${frame.oil_pressure_innovation >= 0 ? "+" : ""}${frame.oil_pressure_innovation.toFixed(1)} kPa`
+        : null;
+    default:
+      return null;
+  }
+}
 
 export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean }) {
   const [sensorMounts, setSensorMounts] = useState<string[]>([]);
+  const [sensorDetail, setSensorDetail] = useState<Record<string, string | null>>({});
   const [vitals, setVitals] = useState({ boost: 0, rpm: 0, egt: 0 });
 
   // Poll the store at 4 Hz. These are DOM nodes with text in them; re-rendering them at
@@ -97,6 +131,9 @@ export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean })
         prev.length === mounts.length && prev.every((m, i) => m === mounts[i])
           ? prev
           : mounts
+      );
+      setSensorDetail(
+        Object.fromEntries(mounts.map((m) => [m, fusionBadgeDetail(m, frame)]))
       );
 
       const egtMean =
@@ -217,7 +254,10 @@ export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean })
               </span>
               <span>
                 <strong>{SENSOR_BADGE_LABEL[mount] ?? mount}</strong>
-                <span style={{ opacity: 0.75 }}> — suspect reading</span>
+                <span style={{ opacity: 0.75 }}>
+                  {" — "}
+                  {sensorDetail[mount] ?? "suspect reading"}
+                </span>
               </span>
             </div>
           </Html>

@@ -369,6 +369,59 @@ class EngineParams:
     #: Overall health index the scenario summary treats as "still safe".
     scenario_health_safe_threshold: float = 70.0
 
+    # ==== Phase 5 additions: sensor fusion (app/fusion/) ========================
+
+    # ---- CHT dual-probe fusion (cht_fusion.py) ---------------------------------
+    #: Two independently-mounted CHT probes, each with its own noise floor — a
+    #: real second probe would not be an identical duplicate of the first.
+    noise_cht_c_primary: float = 0.75        # matches the pre-fusion noise_cht_c
+    noise_cht_c_secondary: float = 1.15
+    #: Growing offset at severity 1 for a drifting CHT probe — same mechanism as
+    #: `sensor_egt_drift_max_c`, scaled to CHT's narrower operating band.
+    sensor_cht_drift_max_c: float = 55.0
+    #: Kalman process variance (degC^2 per tick) for the CHT random walk. Small: CHT's
+    #: thermal mass means it cannot move far between 100 ms-equivalent ticks, so the
+    #: fused estimate should mostly trust its own running state between updates and let
+    #: two independent sensors argue it into place.
+    cht_fusion_process_variance_c2: float = 0.05
+
+    # ---- RPM cross-modality fusion (rpm_fusion.py) -----------------------------
+    #: Kalman process variance (rpm^2 per tick) for the fused RPM random walk. Wider than
+    #: CHT's — RPM genuinely can move several rpm between ticks during a throttle
+    #: transient, and the filter should not fight a real change.
+    rpm_fusion_process_variance_rpm2: float = 36.0
+    #: Floor on the vibration-derived RPM estimate's measurement variance. The FFT bin
+    #: width alone (sample_rate / N) sets a hard floor on how precisely a dominant
+    #: frequency can be read, converted to RPM — this adds picking noise on top of that
+    #: so a wide, low-energy dominant bin does not look artificially exact.
+    noise_rpm_vibration_derived_floor: float = 12.0
+    #: Extra measurement-sigma (rpm) per rpm/s of fused-RPM rate of change. A coarse,
+    #: once-per-tick FFT snapshot lags during a fast transient (a mission-phase change,
+    #: a throttle step); widening its variance while the fused estimate is moving fast
+    #: de-weights that lag rather than letting it fight the tachometer.
+    rpm_vibration_transient_widening_per_rpm_s: float = 6.0
+
+    # ---- Oil pressure model+sensor fusion (oil_pressure_fusion.py) -------------
+    #: Kalman process variance (kPa^2 per tick) for the lubrication-equation PREDICT
+    #: step. Narrow when no lubrication fault is suspected — the zero-wear-calibrated
+    #: model is then a good predictor and the fused estimate should lean on it, smoothing
+    #: sensor noise rather than chasing it.
+    oil_pressure_model_process_variance_healthy_kpa2: float = 4.0
+    #: Widened Q once a lubrication fault is suspected active — the zero-wear model is
+    #: now a materially worse predictor, so the filter should trust the raw sensor over
+    #: its own prediction. Two orders of magnitude wider is what actually shifts the
+    #: Kalman gain from "mostly model" to "mostly sensor" (see the gain formula).
+    oil_pressure_model_process_variance_faulted_kpa2: float = 450.0
+    #: Severity above which bearing_wear / oil_pump_degradation counts as "a lubrication
+    #: fault is active" for the purpose of widening Q. Small — the model should stop
+    #: being trusted the moment real degradation starts, not once it is already severe.
+    oil_pressure_fault_suspect_threshold: float = 0.05
+    #: Time constant for the gain's own slow "healthy baseline" tracker — the same
+    #: detrending idea `imep_baseline_tau_s` already uses elsewhere in this file, applied
+    #: here so "the gain deviated from its own recent normal" is a zero-centred signal
+    #: the classifier's EWMA z-scoring can consume the same way it consumes a residual.
+    oil_pressure_gain_baseline_tau_s: float = 120.0
+
 
 PARAMS = EngineParams()
 """Default engine. Models accept an EngineParams so alternates can be swapped in."""

@@ -9,7 +9,12 @@
  * returns ordinary frames, which is what lets the Test Bench render them with the same
  * chart components the dashboard uses.
  */
-import type { MaintenanceAdvisory, Recommendation, TelemetryFrame } from "@/lib/types";
+import type {
+  MaintenanceAdvisory,
+  Recommendation,
+  RecoveryRecommendation,
+  TelemetryFrame,
+} from "@/lib/types";
 
 export type Verdict = "PASS" | "CAUTION" | "FAIL";
 
@@ -68,6 +73,13 @@ export interface ReliabilityPoint {
   recommendation: Recommendation;
 }
 
+/** Phase 5: same shape as `ReliabilityPoint`, over recovery_reliability's own labels. */
+export interface RecoveryReliabilityPoint {
+  time_min: number;
+  score: number;
+  recommendation: RecoveryRecommendation;
+}
+
 export interface ScenarioSummary {
   verdict: Verdict;
   headline: string;
@@ -85,6 +97,11 @@ export interface ScenarioSummary {
   final_recommendation: Recommendation;
   worst_recommendation: Recommendation;
   mission_reliability_trajectory: ReliabilityPoint[];
+  // ---- Phase 5: recovery reliability ----------------------------------------
+  // Deliberately does not feed `verdict` — see backend/app/ml/mission_reliability.py.
+  final_recovery_recommendation: RecoveryRecommendation;
+  worst_recovery_recommendation: RecoveryRecommendation;
+  recovery_reliability_trajectory: RecoveryReliabilityPoint[];
   limit_excursions: LimitExcursion[];
   caution_excursions: LimitExcursion[];
   peak_cht_c: number;

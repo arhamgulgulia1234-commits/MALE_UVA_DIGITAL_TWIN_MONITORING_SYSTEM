@@ -102,6 +102,17 @@ def _result_payload(result: ScenarioResult, include_frames: bool) -> dict:
                 }
                 for p in summary.mission_reliability_trajectory
             ],
+            # ---- Phase 5: recovery reliability ---------------------------------
+            "final_recovery_recommendation": summary.final_recovery_recommendation,
+            "worst_recovery_recommendation": summary.worst_recovery_recommendation,
+            "recovery_reliability_trajectory": [
+                {
+                    "time_min": p.time_min,
+                    "score": p.score,
+                    "recommendation": p.recommendation,
+                }
+                for p in summary.recovery_reliability_trajectory
+            ],
             "limit_excursions": [_excursion(e) for e in summary.limit_excursions],
             "caution_excursions": [_excursion(e) for e in summary.caution_excursions],
             "peak_cht_c": summary.peak_cht_c,

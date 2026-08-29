@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useTelemetryStore } from "@/lib/store";
 import { FAULT_CATALOG, SENSOR_FAULT_CATALOG } from "@/lib/types";
+import type { TelemetryFrame } from "@/lib/types";
 import { formatTimeHHMMSS } from "@/lib/format";
 
 interface FeedEntry {
@@ -20,6 +21,36 @@ function severityTone(s: number): "caution" | "nogo" | "cyan" {
   if (s >= 0.7) return "nogo";
   if (s >= 0.35) return "caution";
   return "cyan";
+}
+
+/**
+ * The fused-channel sensor faults' badge line — the quantitative innovation that
+ * justifies the call, not just the label. Reads straight off the live frame, so it is
+ * only meaningful for a fault that is *currently* active (the feed keeps cleared
+ * entries around too, which have nothing live left to point at).
+ */
+function fusionInnovationLabel(type: string, latest: TelemetryFrame | null): string | null {
+  if (!latest) return null;
+  switch (type) {
+    case "cht_sensor_primary_drift":
+      return latest.cht_sensor_innovations
+        ? `Probe #1 disagrees with the fused estimate by ${latest.cht_sensor_innovations.primary >= 0 ? "+" : ""}${latest.cht_sensor_innovations.primary.toFixed(1)}°C`
+        : null;
+    case "cht_sensor_secondary_drift":
+      return latest.cht_sensor_innovations
+        ? `Probe #2 disagrees with the fused estimate by ${latest.cht_sensor_innovations.secondary >= 0 ? "+" : ""}${latest.cht_sensor_innovations.secondary.toFixed(1)}°C`
+        : null;
+    case "rpm_sensor_stuck":
+      return latest.rpm_sensor_innovations
+        ? `Tachometer disagrees with the fused estimate by ${latest.rpm_sensor_innovations.tachometer >= 0 ? "+" : ""}${latest.rpm_sensor_innovations.tachometer.toFixed(0)} rpm`
+        : null;
+    case "oil_pressure_sensor_noise":
+      return latest.oil_pressure_innovation != null
+        ? `Sensor disagrees with the model-predicted pressure by ${latest.oil_pressure_innovation >= 0 ? "+" : ""}${latest.oil_pressure_innovation.toFixed(1)} kPa`
+        : null;
+    default:
+      return null;
+  }
 }
 
 export function FaultAlertFeed() {
@@ -114,6 +145,13 @@ export function FaultAlertFeed() {
                       </span>
                     </div>
                     <p className="truncate text-[11px] text-slate-500">{meta?.description}</p>
+                    {entry.event === "detected" &&
+                      (() => {
+                        const detail = fusionInnovationLabel(entry.type, latest);
+                        return detail ? (
+                          <p className="truncate text-[10px] text-status-cyan">{detail}</p>
+                        ) : null;
+                      })()}
                   </div>
                   <div className="shrink-0 text-right">
                     {entry.event === "detected" && (

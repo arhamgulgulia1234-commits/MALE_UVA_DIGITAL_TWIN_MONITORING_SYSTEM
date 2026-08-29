@@ -33,6 +33,15 @@ SENSOR_FAULT_TYPES: tuple[str, ...] = (
     "egt_sensor_drift",
     "oil_pressure_sensor_noise",
     "rpm_sensor_stuck",
+    # --- Phase 5: fused-channel probe faults --------------------------------
+    # CHT is the one fused channel with no pre-existing sensor fault to reuse — RPM
+    # already had `rpm_sensor_stuck` (the tachometer half of app/fusion/rpm_fusion.py)
+    # and oil pressure already had `oil_pressure_sensor_noise` (the sensor half of
+    # app/fusion/oil_pressure_fusion.py's predict/update pair). Two probes means two
+    # independent fault types, one per instrument, so a fault can be injected on
+    # exactly one of them without touching the other.
+    "cht_sensor_primary_drift",
+    "cht_sensor_secondary_drift",
 )
 
 #: Which telemetry channel each sensor fault corrupts. Used by the disambiguation logic
@@ -41,6 +50,8 @@ SENSOR_FAULT_CHANNEL: dict[str, str] = {
     "egt_sensor_drift": "egt_mean_c",
     "oil_pressure_sensor_noise": "oil_pressure_kpa",
     "rpm_sensor_stuck": "rpm",
+    "cht_sensor_primary_drift": "cht_sensor_primary",
+    "cht_sensor_secondary_drift": "cht_sensor_secondary",
 }
 
 
@@ -71,6 +82,9 @@ class SensorFaultState:
     egt_sensor_drift: float = 0.0
     oil_pressure_sensor_noise: float = 0.0
     rpm_sensor_stuck: float = 0.0
+    # --- Phase 5 -------------------------------------------------------------
+    cht_sensor_primary_drift: float = 0.0
+    cht_sensor_secondary_drift: float = 0.0
 
     started_at: dict[str, float] = field(default_factory=dict)
     #: Which cylinder's probe is drifting (EGT is per cylinder).

@@ -13,8 +13,15 @@ Plots produced:
     06_prognostics.png     RUL and mission reliability
     07_residuals.png       real vs healthy-twin residuals for key channels
 
+`--scenario throttle-transient` and `--scenario fusion` are separate modes with their
+own plots (08_throttle_transient.png, 09_sensor_fusion.png) — see `run_fusion_validation`
+for what the latter proves: an isolated secondary-CHT-probe fault, with the fused
+estimate staying close to the true simulated CHT while the classifier names that specific
+probe rather than the engine's cooling subsystem.
+
 Usage:
     python -m scripts.validate_physics [--fault bearing_wear] [--minutes 10]
+    python -m scripts.validate_physics --scenario fusion
 """
 from __future__ import annotations
 
@@ -408,6 +415,145 @@ def plot_all(rec: dict, fault_type: str) -> list[Path]:
     return written
 
 
+def run_fusion_validation(
+    minutes: float = 5.0,
+    inject_at_min: float = 1.5,
+    severity: float = 0.85,
+    ramp_s: float = 20.0,
+    time_scale: float = 5.0,
+) -> dict:
+    """Phase 5: inject a fault on *only* the secondary CHT probe — not the primary, not
+    the real engine — and record everything needed to prove two things: (a) the fused
+    estimate stays close to the true simulated CHT even while the secondary's raw
+    reading drifts badly, and (b) the classifier names the secondary probe specifically,
+    not the engine's cooling subsystem.
+
+    `true_cht_c` comes from `sim.diagnostics.fusion_values["true_cht_c"]` — the exact
+    pre-noise physical value, captured in `SimulationLoop.tick()` before either probe's
+    independent noise is drawn from it. It is diagnostic-only ground truth, the same way
+    `sim.diagnostics.true_state` already is for the Phase 3 sensor-fault checks below.
+    """
+    sim = SimulationLoop()
+    sim.set_time_scale(time_scale)
+
+    total_sim_s = minutes * 60.0
+    inject_at_s = inject_at_min * 60.0
+    ticks = int(total_sim_s / (TICK_S * time_scale))
+    inject_tick = int(inject_at_s / (TICK_S * time_scale))
+
+    rec: dict[str, list] = {
+        k: []
+        for k in (
+            "t", "true_cht", "primary_cht", "secondary_cht", "fused_cht",
+            "predicted_source", "suspect_sensor", "severity",
+        )
+    }
+
+    injected = False
+    for i in range(ticks):
+        if i == inject_tick:
+            sim.inject_sensor_fault("cht_sensor_secondary_drift", severity, ramp_s)
+            injected = True
+        frame = sim.tick(TICK_S)
+        diag = sim.diagnostics
+
+        rec["t"].append(sim.sim_time_s / 60.0)
+        rec["true_cht"].append(diag.fusion_values.get("true_cht_c", float("nan")))
+        rec["fused_cht"].append(frame.fused_cht_c)
+        innov = frame.cht_sensor_innovations
+        rec["primary_cht"].append(
+            frame.fused_cht_c + innov.primary if innov and frame.fused_cht_c is not None else float("nan")
+        )
+        rec["secondary_cht"].append(
+            frame.fused_cht_c + innov.secondary if innov and frame.fused_cht_c is not None else float("nan")
+        )
+        rec["predicted_source"].append(diag.predicted_source)
+        rec["suspect_sensor"].append(diag.suspect_sensor)
+        rec["severity"].append(sim.sensor_faults.severity("cht_sensor_secondary_drift"))
+
+    rec["_inject_min"] = inject_at_min if injected else None
+    return rec
+
+
+def _report_fusion(rec: dict) -> bool:
+    """Prints the pass/fail checks Task 9 asks for and returns overall pass/fail."""
+    true_cht = rec["true_cht"]
+    fused = rec["fused_cht"]
+    secondary = rec["secondary_cht"]
+
+    # Average over the last 30 s of the run, once the fault has fully ramped in and the
+    # filter has settled — a single last sample would be noisy.
+    tail_n = min(len(true_cht), 300)
+    fused_error = sum(
+        abs(f - t) for f, t in zip(fused[-tail_n:], true_cht[-tail_n:])
+    ) / tail_n
+    secondary_error = sum(
+        abs(s - t) for s, t in zip(secondary[-tail_n:], true_cht[-tail_n:])
+    ) / tail_n
+
+    fused_close = fused_error < 3.0
+    secondary_drifted = secondary_error > 10.0
+
+    tail_sources = rec["predicted_source"][-tail_n:]
+    tail_suspects = rec["suspect_sensor"][-tail_n:]
+    source_ok = tail_sources.count("sensor_fault") / tail_n > 0.8
+    suspect_ok = tail_suspects.count("cht_sensor_secondary") / tail_n > 0.8
+
+    print("\n--- sensor fusion validation: secondary CHT probe fault ---")
+    print(f"  mean |fused - true| (last {tail_n} samples)      {fused_error:6.2f} degC  "
+          f"{'PASS' if fused_close else 'FAIL'} (< 3.0 degC)")
+    print(f"  mean |secondary raw - true| (last {tail_n} samples) {secondary_error:6.2f} degC  "
+          f"{'PASS' if secondary_drifted else 'FAIL'} (> 10.0 degC, i.e. it really did drift)")
+    print(f"  predicted_source == 'sensor_fault'                 "
+          f"{'PASS' if source_ok else 'FAIL'} "
+          f"({tail_sources.count('sensor_fault')}/{tail_n} samples)")
+    print(f"  suspect_sensor == 'cht_sensor_secondary'            "
+          f"{'PASS' if suspect_ok else 'FAIL'} "
+          f"({tail_suspects.count('cht_sensor_secondary')}/{tail_n} samples)")
+
+    return fused_close and secondary_drifted and source_ok and suspect_ok
+
+
+def plot_fusion(rec: dict) -> list[Path]:
+    """The single clearest proof this feature works: true CHT, both raw probes and the
+    fused estimate on one chart. The fused line should track the true line closely
+    throughout — including after the secondary probe visibly departs from both."""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    t = rec["t"]
+    fault_at = rec["_inject_min"]
+
+    fig, axes = plt.subplots(2, 1, figsize=(11, 7), sharex=True,
+                              gridspec_kw={"height_ratios": [3, 1]})
+
+    ax = axes[0]
+    ax.plot(t, rec["true_cht"], color="#333333", lw=2.2, ls="--",
+             label="True CHT (ground truth)")
+    ax.plot(t, rec["primary_cht"], color=C_PRIMARY, lw=1.1, alpha=0.85,
+             label="Primary probe (raw)")
+    ax.plot(t, rec["secondary_cht"], color=C_FAULT, lw=1.1, alpha=0.85,
+             label="Secondary probe (raw) — faulted")
+    ax.plot(t, rec["fused_cht"], color=C_THIRD, lw=2.0,
+             label="Fused estimate")
+    ax.legend(fontsize=8, frameon=False, loc="upper left")
+    style(ax, "Sensor fusion under an isolated secondary-probe fault", "°C", fault_at)
+
+    ax2 = axes[1]
+    ax2.plot(t, rec["severity"], color=C_FAULT, lw=1.3)
+    ax2.set_ylim(-0.05, 1.05)
+    style(ax2, "Injected fault severity (secondary probe only)", "severity", fault_at)
+    ax2.set_xlabel("mission time (min)", fontsize=9)
+
+    fig.suptitle(
+        "Phase 5 validation — CHT dual-sensor fusion vs. an isolated probe fault",
+        fontsize=13, fontweight="600",
+    )
+    fig.tight_layout()
+    path = OUTPUT_DIR / "09_sensor_fusion.png"
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+    return [path]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fault", default="bearing_wear", choices=list(FAULT_TYPES))
@@ -421,9 +567,10 @@ def main() -> None:
     parser.add_argument(
         "--scenario",
         default="fault",
-        choices=["fault", "throttle-transient"],
+        choices=["fault", "throttle-transient", "fusion"],
         help="'fault' injects a fault mid-mission; 'throttle-transient' steps the "
-             "throttle 20%%->100%%->20%% to check turbo and thermal lag",
+             "throttle 20%%->100%%->20%% to check turbo and thermal lag; 'fusion' "
+             "injects a fault on only the secondary CHT probe to validate sensor fusion",
     )
     args = parser.parse_args()
 
@@ -440,6 +587,18 @@ def main() -> None:
         print(f"\nWrote {len(written)} plots to {OUTPUT_DIR}/")
         for path in written:
             print(f"  {path.name}")
+        return
+
+    if args.scenario == "fusion":
+        print("Simulating sensor fusion under an isolated secondary CHT-probe fault…")
+        rec = run_fusion_validation()
+        written = plot_fusion(rec)
+        passed = _report_fusion(rec)
+        print(f"\nWrote {len(written)} plots to {OUTPUT_DIR}/")
+        for path in written:
+            print(f"  {path.name}")
+        if not passed:
+            sys.exit(1)
         return
 
     print(f"Simulating {args.minutes:.0f} min, injecting '{args.fault}' at "

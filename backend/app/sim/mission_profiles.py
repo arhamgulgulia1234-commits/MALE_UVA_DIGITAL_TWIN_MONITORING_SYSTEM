@@ -7,7 +7,11 @@ in response. Climb is hot because the throttle is open and the climb rate is hig
 because a table says "climb EGT = 780".
 
 `remaining_seconds()` feeds the mission-reliability model, which needs to know how much
-flying is still planned in order to answer "will this engine make it?".
+flying is still planned in order to answer "will this engine make it?". `estimated_rtb_
+seconds()` feeds the separate recovery-reliability model, which asks the different
+question "if we abort right now, can it get back to base?" — see
+app/ml/mission_reliability.py for why those two are kept apart rather than folded into
+one score.
 """
 from __future__ import annotations
 
@@ -95,6 +99,51 @@ class MissionProfile:
             PHASE_PROFILES[p].duration_s for p in PHASE_ORDER[self.phase_index + 1 :]
         )
         return current_left + later
+
+    def estimated_rtb_seconds(self) -> float:
+        """How long it would take to fly back to base if the mission were aborted right
+        now — a genuinely different question from `remaining_seconds()`, which answers
+        "how much more flying is planned." Feeds `recovery_reliability` instead of
+        `mission_reliability` (see app/ml/mission_reliability.py).
+
+        Deliberately not a flight-path/geometry model — there is no distance-to-base
+        coordinate anywhere in this simulator, and adding one just for this would be
+        exactly the over-engineering the feature does not need. Instead it leans on the
+        one fact this phase state machine already gives for free: `climb` and `cruise`
+        are the outbound leg (each second spent in them is a second flown away from
+        base), `loiter` holds a fixed station (it neither gains nor loses distance from
+        base), and `descent` *is* the return leg already in progress. So:
+
+            climb:   grows with how much of the outbound climb has already been flown,
+                     plus the cruise-and-descent legs still needed to get all the way
+                     back — i.e. RTB time roughly mirrors time already spent outbound.
+            cruise:  the same idea, with the climb leg already banked in full and
+                     cruise's own elapsed time added as it accrues.
+            loiter:  frozen at the full outbound transit (climb + cruise) — circling on
+                     station does not change distance from base, so RTB does not grow
+                     with time spent loitering, matching the same "already spent
+                     outbound" quantity carried over from when loiter began.
+            descent: already flying home. RTB counts down from the descent leg's planned
+                     duration as the descent itself completes, floored at zero.
+
+        Monotonic within every phase, continuous at every phase boundary except the one
+        place it should not be: descent's end (RTB = 0, home) into the next cycle's climb
+        (RTB jumps back up to a full transit-and-descent estimate), which is correct —
+        the moment a new outbound leg begins, aborting immediately still costs a full
+        return leg, exactly as it would flying anything else away from base.
+        """
+        climb = PHASE_PROFILES["climb"]
+        cruise = PHASE_PROFILES["cruise"]
+        descent = PHASE_PROFILES["descent"]
+
+        if self.phase == "climb":
+            return self.phase_elapsed_s + cruise.duration_s + descent.duration_s
+        if self.phase == "cruise":
+            return climb.duration_s + self.phase_elapsed_s + descent.duration_s
+        if self.phase == "loiter":
+            return climb.duration_s + cruise.duration_s + descent.duration_s
+        # descent
+        return max(0.0, descent.duration_s - self.phase_elapsed_s)
 
     def step(self, dt: float) -> None:
         """Advance the phase clock and fly the altitude/airspeed trajectory."""

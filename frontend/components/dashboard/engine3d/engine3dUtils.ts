@@ -202,6 +202,11 @@ export const SENSOR_MOUNTS: Record<string, string> = {
   egt_sensor_drift: "egt",
   oil_pressure_sensor_noise: "oil",
   rpm_sensor_stuck: "rpm",
+  // Phase 5: two independent CHT probes get two independent mount points — the whole
+  // reason to fuse two sensors is so a fault can be pinned to *one* of them, and a
+  // shared badge position would blur that back together.
+  cht_sensor_primary_drift: "cht_primary",
+  cht_sensor_secondary_drift: "cht_secondary",
 };
 
 const EMPTY_FAULT_VIEW: FaultView = {

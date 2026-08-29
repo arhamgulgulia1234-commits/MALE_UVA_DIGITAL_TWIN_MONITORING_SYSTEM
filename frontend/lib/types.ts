@@ -28,9 +28,18 @@ export type FaultType =
 export type SensorFaultType =
   | "egt_sensor_drift"
   | "oil_pressure_sensor_noise"
-  | "rpm_sensor_stuck";
+  | "rpm_sensor_stuck"
+  // --- Phase 5: fused-channel probe faults ---
+  | "cht_sensor_primary_drift"
+  | "cht_sensor_secondary_drift";
 
 export type Recommendation = "GO" | "CAUTION" | "NO-GO";
+
+/**
+ * Phase 5: recovery_reliability's own labels — never GO/CAUTION/NO-GO, so the two
+ * readouts can never be visually mistaken for each other even when they agree.
+ */
+export type RecoveryRecommendation = "RTB-SAFE" | "RTB-CAUTION" | "RTB-AT-RISK";
 
 export type Urgency = "monitor" | "schedule_soon" | "immediate";
 
@@ -62,6 +71,16 @@ export interface HealthState {
 export interface MissionReliability {
   score: number;
   recommendation: Recommendation;
+}
+
+/**
+ * "Can it get back to base if we abort right now?" — a distinct question from
+ * `MissionReliability`'s "can it finish the rest of the planned mission?" See
+ * backend/app/ml/mission_reliability.py::compute_recovery_reliability.
+ */
+export interface RecoveryReliability {
+  score: number;
+  recommendation: RecoveryRecommendation;
 }
 
 export interface ClassifierExplanation {
@@ -132,6 +151,40 @@ export interface TelemetryFrame {
   /** True when frames are replayed from a stored mission rather than generated live. */
   is_replay?: boolean;
   replay_mission_id?: number | null;
+
+  /**
+   * Phase 5: computed every tick alongside `mission_reliability`, over the estimated
+   * time-to-RTB instead of the remaining planned mission. Optional so a frame replayed
+   * from a mission recorded before this field existed still type-checks.
+   */
+  recovery_reliability?: RecoveryReliability | null;
+
+  // ---- Phase 5: sensor fusion (backend/app/fusion/) -----------------------
+  // `cht_c`, `rpm` and `oil_pressure_kpa` above already *are* these fused values —
+  // SimulationLoop.tick() overwrites them before anything downstream reads them. These
+  // fields exist so the UI can show the fusion actually working: the raw per-sensor
+  // disagreement against the number everything else now trusts.
+  fused_cht_c?: number | null;
+  cht_sensor_innovations?: CHTSensorInnovations | null;
+  fused_rpm?: number | null;
+  rpm_sensor_innovations?: RPMSensorInnovations | null;
+  fused_oil_pressure_kpa?: number | null;
+  oil_pressure_innovation?: number | null;
+  /** Trending toward 1 means the fused estimate has shifted to trusting the raw sensor
+   * almost completely — the zero-wear model's own prediction confidence has degraded. */
+  oil_pressure_kalman_gain?: number | null;
+}
+
+/** Each CHT probe's residual against the fused estimate — not against each other. */
+export interface CHTSensorInnovations {
+  primary: number;
+  secondary: number;
+}
+
+/** Tachometer and vibration-derived RPM, each against the fused estimate. */
+export interface RPMSensorInnovations {
+  tachometer: number;
+  vibration_derived: number;
 }
 
 /** A recorded mission, as listed by GET /control/missions. */
@@ -254,6 +307,18 @@ export const SENSOR_FAULT_CATALOG: SensorFaultMeta[] = [
     label: "RPM Sensor Stuck",
     description: "Tachometer reading freezes while the engine keeps changing speed",
     channel: "RPM",
+  },
+  {
+    type: "cht_sensor_primary_drift",
+    label: "CHT Probe #1 Drift",
+    description: "Primary cylinder head probe reads progressively high — the secondary probe and the fused estimate disagree with it",
+    channel: "CHT",
+  },
+  {
+    type: "cht_sensor_secondary_drift",
+    label: "CHT Probe #2 Drift",
+    description: "Secondary cylinder head probe reads progressively high — the primary probe and the fused estimate disagree with it",
+    channel: "CHT",
   },
 ];
 

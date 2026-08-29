@@ -370,6 +370,123 @@ it entirely and is the right answer if this ever runs on constrained edge hardwa
   could silently retrim a running engine because it thought that was a good idea is exactly
   the design `docs/deployment-roadmap.md` argues against.
 
+## Sensor Fusion (Phase 5)
+
+The PS names "sensor fusion" directly in its Technical Expectations. Before this phase,
+what the system actually had was a correlation heuristic:
+`app/ml/fault_classifier.py::classify_source` asked "did this channel's physically-linked
+neighbours move with it?" and called that "sensor fault" when the answer was no. That is
+a reasonable inference, but it is an *inference about absence* — it never compares two
+independent readings of the same physical quantity against each other, because before
+this phase nothing in the system produced two independent readings of anything. Phase 5
+adds an actual Kalman-filter fusion layer for three channels, so the disambiguation this
+project has claimed since Phase 3 is now backed by a number instead of a heuristic.
+
+**The filter.** `app/fusion/kalman_filter.py` is one small, reusable scalar Kalman filter
+— `predict()` (a process model, or a random walk if none is supplied) then one or more
+sequential `update()` calls, each exposing its own innovation and gain. It knows nothing
+about CHT, RPM or oil pressure; each fusion channel below is a thin, differently-shaped
+wrapper around the same equations. `predict()` scales its process variance by `dt_s /
+REFERENCE_DT_S` rather than adding a fixed amount per call — every fusion channel is
+stepped once per tick, and a tick's simulated duration ranges from ~20 ms to several
+seconds depending on the demo's time-acceleration setting. Missing this scaling was a
+real bug caught by `scripts/stability_checks.py`: the fused RPM trajectory at 20x
+diverged 214 rpm from the identical mission at 1x (tolerance 30 rpm) before this was
+anchored to simulated seconds the same way every other time constant in this codebase
+already is (`ResidualMonitor`, `AnomalyDetector`, `RULPredictor`).
+
+**CHT — two independent probes, no process model.** `app/fusion/cht_fusion.py` adds a
+second, independently-noised simulated CHT probe next to the existing one — each drawn
+from the same true physical temperature (`thermal_model.py`) but corrupted separately, so
+either can fail without the other. The "process model" is deliberately just a random
+walk with a small Q: CHT has enough thermal mass that it cannot move far between ticks, so
+two sensors arguing about where it currently sits is the entire estimation problem.
+
+A plain Kalman filter is *not* naturally robust to one sensor lying — it blends
+measurements by their declared variance, and that variance does not shrink just because a
+sensor started drifting. Verified directly while building this: without correction, a
+secondary probe drifting 40+ degC away from truth pulled the fused estimate roughly
+halfway to it, which defeats the entire point of fusing two sensors. The fix
+(`kalman_filter.adaptive_measurement_variance`, paired with a slow `InnovationTracker` per
+sensor) inflates a sensor's *effective* variance when its own recent disagreement with the
+fused estimate has grown well beyond its noise floor — using only that sensor's own
+behaviour, never ground truth. That is what lets the fused estimate stay within a fraction
+of a degree of the true CHT throughout an isolated secondary-probe fault (see
+`backend/scripts/output/09_sensor_fusion.png`), while the secondary's own innovation
+against the fused estimate grows into a large, isolated, unmistakable signal.
+
+**RPM — two different physical principles, not two instruments.** `app/fusion/rpm_fusion.py`
+fuses the tachometer against an RPM estimate derived from the vibration model's own
+FFT-detected dominant frequency (`RPM = f_fire * 120 / n_cylinders` for this 4-stroke,
+4-cylinder engine — inverting the same relation `vibration_model.py` uses to *synthesise*
+the signal, read back out of the rolling buffer's own spectrum rather than the ground
+truth used to generate it). This pair has a genuine, stated limitation: with only two
+sources and no third reference, the filter cannot determine *which* of two persistently
+disagreeing sources is correct — it settles toward whichever one it trusted more before
+the disagreement started, which is not the same thing as identifying the truth. Resolving
+that needs the independent evidence `app/ml/fault_classifier.py::_classify_rpm` actually
+checks: whether cylinder-level vibration RMS (an amplitude measurement this fusion pair
+never looks at) is independently elevated. Elevated RMS alongside a disagreeing
+vibration-derived RPM reads as a real mechanical issue; a disagreeing tachometer with RMS
+untouched reads as `rpm_sensor_stuck`.
+
+A second, narrower issue surfaced and is worth recording even though it is now resolved:
+`scripts/stability_checks.py` compares a mission flown at 1x time-scale against the
+identical mission at 20x, and RPM (uniquely among the three fused channels) diverged
+during one specific moment — a sharp mission-phase transition (loiter-to-descent) with two
+faults ramping simultaneously — because the vibration-derived RPM comes from an FFT
+snapshot taken once per *tick*, and a tick's simulated duration is 20x longer at 20x than
+at 1x. During a genuinely fast transient, that coarser snapshot samples a different
+instant of the same transition at each time-scale, and occasionally locked onto a
+spurious spectral bin under `bearing_wear`'s broadband noise entirely (one such tick
+implied ~7500 rpm against a true ~2000 rpm). Three fixes closed it in sequence: clamping
+the vibration-derived estimate to a physically plausible RPM range (catching the outlier
+before it can be trusted at all), widening the vibration source's measurement variance
+when the fused RPM's own rate of change is high (`rpm_vibration_transient_widening_per_
+rpm_s`, de-weighting the coarse snapshot specifically during a transient), and the
+dt-scaling fix described above. The same scenario went from 214 rpm of divergence to 10.6
+rpm (tolerance 30) — `scripts/stability_checks.py` now passes cleanly on every channel.
+
+**Oil pressure — the textbook predict/update pair.** `app/fusion/oil_pressure_fusion.py`
+is the one channel with an actual process model: `lubrication_model.py`'s own pressure
+equation, evaluated at zero wear, is the PREDICT step, and the raw sensor is the UPDATE
+step. The interesting lever is `process_variance_q`, which widens the moment
+`bearing_wear` or `oil_pump_degradation` crosses a small suspicion threshold — read
+directly from `FaultState`, the same ground truth every other physics module already
+reads to compute its own outputs, at the same physics layer (the classifier downstream
+never sees `FaultState`, only this fusion's innovation and gain). Widening Q shifts trust
+toward the sensor, which produces two distinguishable signatures for the same symptom
+(a persistent innovation): a sensor fault leaves Q narrow and the gain low, because
+nothing has told the filter its own model is wrong; a real lubrication fault widens Q and
+the gain visibly climbs toward 1, because the zero-wear model's own prediction confidence
+is what actually degraded. `oil_pressure_kalman_gain` — and its deviation from a slow
+healthy baseline, `oil_pressure_gain_deviation` — is exposed on `TelemetryFrame` and fed to
+the classifier specifically so that shift is visible as data, not just as an internal
+implementation detail.
+
+**What actually consumes the fused value.** `SimulationLoop.tick()` writes each fused
+result back onto `PlantState` (`real_state.cht_c`, `.rpm`, `.oil_pressure_kpa`) *before*
+`DigitalTwin.compare()`, the residual monitor, the anomaly detector and the RUL predictor
+ever run. None of those four modules changed at all — they still read the same three
+attributes they always have. What changed is that those attributes now hold a Kalman
+best-estimate from two independent sources instead of one noisy sensor, for every
+downstream consumer, with no separate code path for "the fused version" to be forgotten or
+bypassed.
+
+**Classifier features.** `app/fusion/fusion_monitor.py` gives the six fusion signals
+(two CHT innovations, two RPM innovations, the oil-pressure innovation and its gain
+deviation) the identical EWMA-mean/z/std treatment `app/twin/residual_analysis.py` gives
+real-vs-twin residuals — deliberately a *separate* small monitor rather than a forced fit
+into that one, because a fusion innovation is a different comparison axis entirely (raw
+sensor vs. fused estimate, never involving the digital twin, which has no sensors to fuse
+in the first place). `app/ml/fault_classifier.py::classify_source` checks these six
+signals *before* falling back to the original correlation heuristic, and it has to: fusion
+is specifically built to keep a fused channel's residual against the twin looking normal
+even while one of its two sources lies, so waiting for that channel to become the
+"loudest moved" residual — the correlation heuristic's own trigger — would miss exactly
+the case this layer exists to catch. Every channel Part B did not build a fusion pair for
+(EGT, fuel, battery, ...) still falls through to that original heuristic, unchanged.
+
 ## Backend module responsibilities
 
 | Module | Responsibility |

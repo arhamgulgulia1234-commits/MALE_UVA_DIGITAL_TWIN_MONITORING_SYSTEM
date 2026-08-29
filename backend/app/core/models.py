@@ -43,6 +43,11 @@ SensorFaultType = Literal[
 
 Recommendation = Literal["GO", "CAUTION", "NO-GO"]
 
+#: Phase 5: recovery_reliability's own recommendation labels — deliberately never
+#: GO/CAUTION/NO-GO, so the two reliability readouts can never be visually mistaken for
+#: each other even when they happen to agree (see app/ml/mission_reliability.py).
+RecoveryRecommendation = Literal["RTB-SAFE", "RTB-CAUTION", "RTB-AT-RISK"]
+
 Urgency = Literal["monitor", "schedule_soon", "immediate"]
 
 EfficiencyTrend = Literal["stable", "degrading", "improving"]
@@ -76,6 +81,35 @@ class HealthState(BaseModel):
 class MissionReliability(BaseModel):
     score: float
     recommendation: Recommendation
+
+
+class CHTSensorInnovations(BaseModel):
+    """Each CHT probe's residual against the fused estimate — not against each other
+    directly. A sustained large value on one side while the other stays small is a
+    precise, quantitative signal that *that* probe specifically has a problem; see
+    app/fusion/cht_fusion.py."""
+
+    primary: float
+    secondary: float
+
+
+class RPMSensorInnovations(BaseModel):
+    """Tachometer and vibration-derived RPM, each against the fused estimate. See
+    app/fusion/rpm_fusion.py for what a persistent disagreement between them does and
+    does not tell you on its own."""
+
+    tachometer: float
+    vibration_derived: float
+
+
+class RecoveryReliability(BaseModel):
+    """"Can it get back to base if we abort right now?" — a distinct question from
+    `MissionReliability`'s "can it finish the rest of the planned mission?", with its
+    own recommendation vocabulary so the two are never confused at a glance. See
+    app/ml/mission_reliability.py::compute_recovery_reliability."""
+
+    score: float
+    recommendation: RecoveryRecommendation
 
 
 class ClassifierExplanation(BaseModel):
@@ -157,6 +191,29 @@ class TelemetryFrame(BaseModel):
 
     #: Set during replay so the UI can identify the source mission.
     replay_mission_id: Optional[int] = None
+
+    #: Phase 5: "can it get back to base if we abort right now?" — computed every tick
+    #: alongside `mission_reliability`, but over the estimated time-to-RTB instead of the
+    #: remaining planned mission. Optional so a frame replayed from a mission recorded
+    #: before this field existed still validates.
+    recovery_reliability: Optional[RecoveryReliability] = None
+
+    # ---- Phase 5: sensor fusion (app/fusion/) --------------------------------
+    # These are the values health scoring, RUL and residuals now actually consume —
+    # `cht_c`, `rpm` and `oil_pressure_kpa` above already *are* the fused estimates
+    # (see SimulationLoop.tick(), which overwrites them before anything downstream
+    # reads them). These fields exist so the frontend and the validation script can see
+    # the fusion working, not to carry a second, more-authoritative copy of the number.
+    fused_cht_c: Optional[float] = None
+    cht_sensor_innovations: Optional[CHTSensorInnovations] = None
+    fused_rpm: Optional[float] = None
+    rpm_sensor_innovations: Optional[RPMSensorInnovations] = None
+    fused_oil_pressure_kpa: Optional[float] = None
+    oil_pressure_innovation: Optional[float] = None
+    #: Trending toward 1 means the fused estimate has shifted to trusting the raw sensor
+    #: almost completely — the zero-wear model's own prediction confidence has degraded,
+    #: which is itself a health signal (see oil_pressure_fusion.py's module docstring).
+    oil_pressure_kalman_gain: Optional[float] = None
 
 
 # ---- Phase 1/2 request models -----------------------------------------------

@@ -24,14 +24,21 @@ from app.core.config import settings
 from app.core.engine_params import PARAMS, EngineParams
 from app.core.models import (
     ActiveFault,
+    CHTSensorInnovations,
     ClassifierExplanation,
     CylinderReading,
     HealthState,
     MaintenanceAdvisory,
     MissionReliability,
+    RecoveryReliability,
+    RPMSensorInnovations,
     SubsystemScores,
     TelemetryFrame,
 )
+from app.fusion.cht_fusion import CHTFusion
+from app.fusion.fusion_monitor import FusionMonitor
+from app.fusion.oil_pressure_fusion import OilPressureFusion
+from app.fusion.rpm_fusion import RPMFusion
 from app.ml.anomaly_detector import AnomalyDetector, AnomalyReport
 from app.ml.efficiency_analysis import EfficiencyAnalyser
 from app.ml.fault_classifier import Diagnosis, FaultClassifier
@@ -80,6 +87,16 @@ class DiagnosticSnapshot:
     sensor_fault_truth: dict[str, float] = field(default_factory=dict)
     bsfc_g_per_kwh: float | None = None
     efficiency_trend: str = "stable"
+    # ---- Phase 5: sensor fusion --------------------------------------------
+    #: Raw fusion outputs, keyed for the TelemetryFrame fields and /twin/diagnosis.
+    fusion_values: dict[str, float] = field(default_factory=dict)
+    #: EWMA z-scores over the fusion signals — the classifier's per-fused-channel
+    #: disambiguation input (see fault_classifier.classify_source).
+    fusion_z: dict[str, float] = field(default_factory=dict)
+    #: Which specific probe/instrument the disambiguation logic named, if any — e.g.
+    #: "cht_sensor_secondary", "rpm_tachometer". None when no fused channel is
+    #: implicated, or when the culprit cannot be narrowed past a general subsystem.
+    suspect_sensor: str | None = None
 
 
 class SimulationLoop:
@@ -97,15 +114,27 @@ class SimulationLoop:
         self.faults = FaultState()
 
         self.residuals = ResidualMonitor()
+        self.fusion_stats = FusionMonitor()
         self.anomaly = AnomalyDetector()
         self.rul = RULPredictor()
         self.reliability = MissionReliabilityModel()
         self.classifier = FaultClassifier()
-        self.classifier.set_feature_names(self.residuals.feature_names())
+        self.classifier.set_feature_names(
+            self.residuals.feature_names() + self.fusion_stats.feature_names()
+        )
 
         # ---- Phase 3 --------------------------------------------------------
         self.sensor_faults = SensorFaultState()
         self.sensor_model = SensorFaultModel(params)
+        # Phase 5: sensor fusion. Each replaces a single noisy reading with a Kalman
+        # best-estimate from independent evidence — see app/fusion/ for why each channel
+        # is fused the way it is. Their outputs are written back onto `real_state`
+        # every tick (below, in `tick()`), which is what makes the fused values — not
+        # the raw sensor readings — what residuals, health scoring and RUL actually
+        # consume from here on.
+        self.cht_fusion = CHTFusion(params)
+        self.rpm_fusion = RPMFusion(params)
+        self.oil_pressure_fusion = OilPressureFusion(params)
         self.efficiency = EfficiencyAnalyser(
             fuel_density_kg_per_l=params.fuel_density_kg_per_l
         )
@@ -326,6 +355,15 @@ class SimulationLoop:
             )
 
         # ---- once-per-tick PHM chain ----------------------------------------
+        # Phase 5: the true, pre-noise CHT and oil temperature — captured here, before
+        # `finalise_tick()` applies the legacy single-sensor Gaussian noise, because
+        # `cht_fusion.py` and `oil_pressure_fusion.py` need to draw their *own*
+        # independent noise from the real physical value, not from an already-noised
+        # one. `plant.state` at this exact point (last substep already ran, nothing
+        # once-per-tick has touched it yet) is the one place that value exists.
+        true_cht_c = self.plant.state.cht_c
+        true_oil_temp_c = self.plant.state.oil_temp_c
+
         real_state = self.plant.finalise_tick()
 
         # Phase 3: sensor faults corrupt the *reported* values, and they are applied here
@@ -337,6 +375,39 @@ class SimulationLoop:
         if self.sensor_faults.any_active():
             self.sensor_model.apply(real_state, self.sensor_faults)
 
+        # Phase 5: fuse. RPM first (it uses the tachometer + vibration readings
+        # `finalise_tick()`/`sensor_model.apply()` just finished producing), then oil
+        # pressure (it needs *this tick's* fused RPM for its model-predicted term).
+        # Every fused value is written back onto `real_state` immediately — the residual
+        # monitor, anomaly detector, RUL predictor and the frame assembled below all read
+        # `real_state.cht_c` / `.rpm` / `.oil_pressure_kpa` exactly as before, so from
+        # this line on they are consuming the fused best-estimate instead of one noisy
+        # sensor, with no changes needed anywhere downstream.
+        cht_fusion_out = self.cht_fusion.step(true_cht_c, self.sensor_faults, sim_dt_total)
+        rpm_fusion_out = self.rpm_fusion.step(real_state, self.sensor_faults, sim_dt_total)
+        oil_fusion_out = self.oil_pressure_fusion.step(
+            fused_rpm=rpm_fusion_out.fused_rpm,
+            oil_temp_c=true_oil_temp_c,
+            sensor_reading_kpa=real_state.oil_pressure_kpa,
+            fault_state=self.faults,
+            dt_s=sim_dt_total,
+        )
+        real_state.cht_c = cht_fusion_out.fused_cht_c
+        real_state.rpm = rpm_fusion_out.fused_rpm
+        real_state.oil_pressure_kpa = oil_fusion_out.fused_oil_pressure_kpa
+
+        fusion_z = self.fusion_stats.update(
+            {
+                "cht_innovation_primary": cht_fusion_out.innovation_primary_c,
+                "cht_innovation_secondary": cht_fusion_out.innovation_secondary_c,
+                "rpm_innovation_tachometer": rpm_fusion_out.innovation_tachometer,
+                "rpm_innovation_vibration_derived": rpm_fusion_out.innovation_vibration_derived,
+                "oil_pressure_innovation": oil_fusion_out.innovation_kpa,
+                "oil_pressure_gain_deviation": oil_fusion_out.kalman_gain_deviation,
+            },
+            dt_s=sim_dt_total,
+        )
+
         comparison = self.twin.compare(real_state)
         report = self.residuals.update(comparison.residuals, dt_s=sim_dt_total)
         anomaly: AnomalyReport = self.anomaly.update(report, dt_s=sim_dt_total)
@@ -346,10 +417,20 @@ class SimulationLoop:
             mission_remaining_s=self.mission.remaining_seconds(),
             overall_health=anomaly.overall_health,
         )
+        # Phase 5: same PHM inputs, a different question — "can it get back to base
+        # right now" instead of "can it finish what's planned." See
+        # app/ml/mission_reliability.py::compute_recovery_reliability.
+        recovery_reliability = self.reliability.compute_recovery_reliability(
+            current_health_indicators=anomaly.health_indicators,
+            rul_estimate=rul_estimate,
+            estimated_rtb_time_minutes=self.mission.estimated_rtb_seconds() / 60.0,
+        )
 
         residual_z = {c: report.z(c) for c in report.stats}
         diagnosis: Diagnosis = self.classifier.predict(
-            self.residuals.feature_vector(), residual_z=residual_z
+            self.residuals.feature_vector() + self.fusion_stats.feature_vector(),
+            residual_z=residual_z,
+            fusion_z=fusion_z,
         )
 
         efficiency = self.efficiency.update(
@@ -390,6 +471,29 @@ class SimulationLoop:
             sensor_fault_truth=self.sensor_faults.snapshot(),
             bsfc_g_per_kwh=efficiency.bsfc_g_per_kwh,
             efficiency_trend=efficiency.trend,
+            fusion_values={
+                # Ground truth for validation only — the exact pre-noise physical CHT,
+                # captured before either probe's independent noise was drawn from it.
+                # Never sent to the frontend, same rule as `true_state` above.
+                "true_cht_c": true_cht_c,
+                "fused_cht_c": cht_fusion_out.fused_cht_c,
+                "cht_primary_reading_c": cht_fusion_out.primary_reading_c,
+                "cht_secondary_reading_c": cht_fusion_out.secondary_reading_c,
+                "cht_innovation_primary_c": cht_fusion_out.innovation_primary_c,
+                "cht_innovation_secondary_c": cht_fusion_out.innovation_secondary_c,
+                "fused_rpm": rpm_fusion_out.fused_rpm,
+                "rpm_tachometer": rpm_fusion_out.tachometer_rpm,
+                "rpm_vibration_derived": rpm_fusion_out.vibration_derived_rpm,
+                "rpm_innovation_tachometer": rpm_fusion_out.innovation_tachometer,
+                "rpm_innovation_vibration_derived": rpm_fusion_out.innovation_vibration_derived,
+                "fused_oil_pressure_kpa": oil_fusion_out.fused_oil_pressure_kpa,
+                "oil_pressure_model_predicted_kpa": oil_fusion_out.model_predicted_kpa,
+                "oil_pressure_sensor_reading_kpa": oil_fusion_out.sensor_reading_kpa,
+                "oil_pressure_innovation_kpa": oil_fusion_out.innovation_kpa,
+                "oil_pressure_kalman_gain": oil_fusion_out.kalman_gain,
+            },
+            fusion_z=fusion_z,
+            suspect_sensor=diagnosis.suspect_sensor,
         )
 
         # ---- assemble the frame (schema identical to Phase 1) ----------------
@@ -460,6 +564,10 @@ class SimulationLoop:
                 score=round(reliability.score, 3),
                 recommendation=reliability.recommendation,  # type: ignore[arg-type]
             ),
+            recovery_reliability=RecoveryReliability(
+                score=round(recovery_reliability.score, 3),
+                recommendation=recovery_reliability.recommendation,  # type: ignore[arg-type]
+            ),
             active_faults=active,
             # ---- Phase 3 fields ------------------------------------------
             battery_voltage_v=round(real_state.battery_voltage_v, 2),
@@ -482,6 +590,20 @@ class SimulationLoop:
                 MaintenanceAdvisory(**a.to_dict()) for a in advisories
             ],
             is_replay=False,
+            # ---- Phase 5: sensor fusion ------------------------------------
+            fused_cht_c=round(cht_fusion_out.fused_cht_c, 1),
+            cht_sensor_innovations=CHTSensorInnovations(
+                primary=round(cht_fusion_out.innovation_primary_c, 2),
+                secondary=round(cht_fusion_out.innovation_secondary_c, 2),
+            ),
+            fused_rpm=round(rpm_fusion_out.fused_rpm, 1),
+            rpm_sensor_innovations=RPMSensorInnovations(
+                tachometer=round(rpm_fusion_out.innovation_tachometer, 1),
+                vibration_derived=round(rpm_fusion_out.innovation_vibration_derived, 1),
+            ),
+            fused_oil_pressure_kpa=round(oil_fusion_out.fused_oil_pressure_kpa, 1),
+            oil_pressure_innovation=round(oil_fusion_out.innovation_kpa, 2),
+            oil_pressure_kalman_gain=round(oil_fusion_out.kalman_gain, 4),
         )
         self._latest = frame
         return frame

@@ -47,6 +47,7 @@ from app.core.models import (
     HealthState,
     MaintenanceAdvisory,
     MissionReliability,
+    RecoveryReliability,
     SubsystemScores,
     TelemetryFrame,
 )
@@ -378,6 +379,14 @@ class ScenarioSummary:
     worst_recommendation: str
     mission_reliability_trajectory: list[ReliabilityPoint]
 
+    # ---- Phase 5: recovery reliability ---------------------------------------
+    # Deliberately does not feed `verdict` — a scenario can end RTB-AT-RISK-worst and
+    # still PASS, or NO-GO-worst and still show RTB-SAFE throughout, because the two
+    # answer different questions (see app/ml/mission_reliability.py).
+    final_recovery_recommendation: str
+    worst_recovery_recommendation: str
+    recovery_reliability_trajectory: list[ReliabilityPoint]
+
     limit_excursions: list[LimitExcursion]
     caution_excursions: list[LimitExcursion]
 
@@ -542,6 +551,7 @@ def run_scenario(
 
     frames: list[TelemetryFrame] = []
     reliability_traj: list[ReliabilityPoint] = []
+    recovery_traj: list[ReliabilityPoint] = []
     excursion_state: dict[tuple[str, str, str], dict] = {}
 
     peak_cht = -1e9
@@ -557,6 +567,8 @@ def run_scenario(
     fuel_lph_sum = 0.0
     worst_reco = "GO"
     reco_rank = {"GO": 0, "CAUTION": 1, "NO-GO": 2}
+    worst_recovery_reco = "RTB-SAFE"
+    recovery_reco_rank = {"RTB-SAFE": 0, "RTB-CAUTION": 1, "RTB-AT-RISK": 2}
 
     sim_time_s = 0.0
     advisories: list = []
@@ -631,6 +643,17 @@ def run_scenario(
             mission_remaining_s=max(0.0, total_s - sim_time_s),
             overall_health=anomaly.overall_health,
         )
+        # Phase 5: a scenario has no phase machinery (no climb/cruise/loiter/descent —
+        # just a throttle profile held or ramped over the run), so there is no outbound
+        # transit to mirror the way `MissionProfile.estimated_rtb_seconds()` does. The
+        # simplest estimate that is still monotonic and still answers "how far out is
+        # this what-if, right now": elapsed scenario time so far, same heuristic as the
+        # mission profile's loiter case ("RTB mirrors time already spent").
+        recovery_reliability = run.reliability.compute_recovery_reliability(
+            current_health_indicators=anomaly.health_indicators,
+            rul_estimate=rul_estimate,
+            estimated_rtb_time_minutes=sim_time_s / 60.0,
+        )
         if diagnosis is None or sample_index % classifier_stride == 0:
             residual_z = {c: report.z(c) for c in report.stats}
             diagnosis = run.classifier.predict(
@@ -676,6 +699,11 @@ def run_scenario(
         fuel_lph_sum += real_state.fuel_flow_lph
         if reco_rank[reliability.recommendation] > reco_rank[worst_reco]:
             worst_reco = reliability.recommendation
+        if (
+            recovery_reco_rank[recovery_reliability.recommendation]
+            > recovery_reco_rank[worst_recovery_reco]
+        ):
+            worst_recovery_reco = recovery_reliability.recommendation
 
         for parameter, value, hard, caution, unit, direction in (
             ("cht_c", real_state.cht_c, p.cht_limit_c, p.cht_caution_c, "degC", "above"),
@@ -713,6 +741,13 @@ def run_scenario(
                 recommendation=reliability.recommendation,
             )
         )
+        recovery_traj.append(
+            ReliabilityPoint(
+                time_min=round(t_min, 3),
+                score=round(recovery_reliability.score, 4),
+                recommendation=recovery_reliability.recommendation,
+            )
+        )
 
         frame = _build_frame(
             sim_time_s=sim_time_s,
@@ -724,6 +759,7 @@ def run_scenario(
             anomaly=anomaly,
             rul_minutes=rul_estimate.minutes,
             reliability=reliability,
+            recovery_reliability=recovery_reliability,
             faults=run.faults,
             predicted_source=diagnosis.predicted_source,
             efficiency=efficiency,
@@ -743,6 +779,11 @@ def run_scenario(
     final_health = frames[-1].health.overall_score if frames else 100.0
     final_rul = frames[-1].rul_minutes if frames else None
     final_reco = frames[-1].mission_reliability.recommendation if frames else "GO"
+    final_recovery_reco = (
+        frames[-1].recovery_reliability.recommendation
+        if frames and frames[-1].recovery_reliability is not None
+        else "RTB-SAFE"
+    )
 
     stayed_healthy = min_health >= p.scenario_health_safe_threshold
     stayed_in_limits = not excursions
@@ -764,6 +805,9 @@ def run_scenario(
         final_recommendation=final_reco,
         worst_recommendation=worst_reco,
         mission_reliability_trajectory=_downsample(reliability_traj, 240),
+        final_recovery_recommendation=final_recovery_reco,
+        worst_recovery_recommendation=worst_recovery_reco,
+        recovery_reliability_trajectory=_downsample(recovery_traj, 240),
         limit_excursions=excursions,
         caution_excursions=cautions,
         peak_cht_c=round(peak_cht, 1),
@@ -825,6 +869,7 @@ def _build_frame(
     anomaly,
     rul_minutes: float | None,
     reliability,
+    recovery_reliability,
     faults: FaultState,
     predicted_source: str,
     efficiency,
@@ -879,6 +924,10 @@ def _build_frame(
         mission_reliability=MissionReliability(
             score=round(reliability.score, 3),
             recommendation=reliability.recommendation,  # type: ignore[arg-type]
+        ),
+        recovery_reliability=RecoveryReliability(
+            score=round(recovery_reliability.score, 3),
+            recommendation=recovery_reliability.recommendation,  # type: ignore[arg-type]
         ),
         active_faults=active,
         battery_voltage_v=round(real_state.battery_voltage_v, 2),

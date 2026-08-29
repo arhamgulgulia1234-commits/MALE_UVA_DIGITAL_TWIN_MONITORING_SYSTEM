@@ -37,6 +37,13 @@ async def diagnosis(request: Request) -> dict:
         "predicted_source": diagnostics.predicted_source,
         "source_rationale": diagnostics.source_rationale,
         "classifier_explanation": diagnostics.classifier_explanation,
+        # ---- Phase 5: sensor fusion — which specific probe, and the raw signals
+        # that named it. `fusion_values` includes `true_cht_c`, ground truth only
+        # available here for the same reason `true_state_uncorrupted` is: never on the
+        # telemetry stream, so the dashboard has to infer sensor-vs-physical honestly.
+        "suspect_sensor": diagnostics.suspect_sensor,
+        "fusion_z": {k: round(v, 3) for k, v in diagnostics.fusion_z.items()},
+        "fusion_values": {k: round(v, 3) for k, v in diagnostics.fusion_values.items()},
         "bsfc_g_per_kwh": diagnostics.bsfc_g_per_kwh,
         "efficiency_trend": diagnostics.efficiency_trend,
         "ground_truth_faults": {

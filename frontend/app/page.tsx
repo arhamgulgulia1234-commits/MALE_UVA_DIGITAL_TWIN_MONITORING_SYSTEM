@@ -12,6 +12,7 @@ import { VibrationSpectrum } from "@/components/dashboard/VibrationSpectrum";
 import { FaultAlertFeed } from "@/components/dashboard/FaultAlertFeed";
 import { EfficiencyTrendChart } from "@/components/dashboard/EfficiencyTrendChart";
 import { MaintenanceAdvisoryPanel } from "@/components/dashboard/MaintenanceAdvisoryPanel";
+import { SensorFusionPanel } from "@/components/dashboard/SensorFusionPanel";
 import { MissionReportView } from "@/components/dashboard/MissionReportView";
 import { ControlDeck } from "@/components/dashboard/ControlDeck";
 import { PerformanceMapViewer } from "@/components/dashboard/PerformanceMapViewer";
@@ -76,6 +77,11 @@ export default function Home() {
           <FaultAlertFeed />
           <MaintenanceAdvisoryPanel />
         </section>
+
+        {/* Phase 5: the one new panel this feature adds — see docs/architecture.md's
+            Sensor Fusion section for why CHT, RPM and oil pressure are each fused the
+            way they are. */}
+        <SensorFusionPanel />
 
         {/* Phase 4: the steady-state dyno map, with the live engine and (once the
             Test Bench optimizer has been run at least once) its recommended operating
