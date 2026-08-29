@@ -14,8 +14,18 @@ import { EfficiencyTrendChart } from "@/components/dashboard/EfficiencyTrendChar
 import { MaintenanceAdvisoryPanel } from "@/components/dashboard/MaintenanceAdvisoryPanel";
 import { MissionReportView } from "@/components/dashboard/MissionReportView";
 import { ControlDeck } from "@/components/dashboard/ControlDeck";
+import { PerformanceMapViewer } from "@/components/dashboard/PerformanceMapViewer";
 // Phase 4: the only change to the live dashboard — a link across to the Test Bench.
 import { ModeNav } from "@/components/nav/ModeNav";
+// Phase 5: engine life-cycle — cumulative wear and hours across every mission this
+// engine has flown, not just the one currently on screen. Lives on this page rather
+// than a route of its own: it reads the same live-updating ledger every other panel
+// here answers from (the running SimulationLoop and its database), so splitting it off
+// behind a separate nav tab bought nothing but an extra click and a colder cache.
+import { LifecycleOverviewPanel } from "@/components/lifecycle/LifecycleOverviewPanel";
+import { HealthTrendAcrossMissions } from "@/components/lifecycle/HealthTrendAcrossMissions";
+import { FaultEventHistoryTable } from "@/components/lifecycle/FaultEventHistoryTable";
+import { LogMaintenanceActionForm } from "@/components/lifecycle/LogMaintenanceActionForm";
 
 const EngineCutaway3D = dynamic(
   () =>
@@ -66,6 +76,23 @@ export default function Home() {
           <FaultAlertFeed />
           <MaintenanceAdvisoryPanel />
         </section>
+
+        {/* Phase 4: the steady-state dyno map, with the live engine and (once the
+            Test Bench optimizer has been run at least once) its recommended operating
+            point both plotted on top of it. */}
+        <PerformanceMapViewer />
+
+        {/* Phase 5: engine life-cycle — cumulative wear and hours across every mission
+            this engine has ever flown, distinct from everything above it on this page,
+            which is scoped to the mission on screen right now. */}
+        <LifecycleOverviewPanel />
+        <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <HealthTrendAcrossMissions />
+          <FaultEventHistoryTable />
+        </section>
+        <div className="xl:max-w-xl">
+          <LogMaintenanceActionForm />
+        </div>
       </main>
 
       <ControlDeck />

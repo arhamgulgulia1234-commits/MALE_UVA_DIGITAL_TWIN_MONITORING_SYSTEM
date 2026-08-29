@@ -5,8 +5,9 @@ schema, and starts the background simulation task. The active simulator is the P
 physics model; setting USE_MOCK=true falls back to the Phase 1 scripted generator as a
 demo-safety net.
 
-Phase 4 mounts two more routers — /simulate/* (Test Bench scenarios) and /optimize/*
-(operating-point optimisation). Neither participates in the live telemetry path.
+Phase 4 mounts three more routers — /simulate/* (Test Bench scenarios), /optimize/*
+(operating-point optimisation) and /performance-maps/* (steady-state engine maps). None of
+them participates in the live telemetry path.
 """
 from __future__ import annotations
 
@@ -21,7 +22,16 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import control, health, optimizer, scenario, twin_diagnostics, ws_telemetry
+from app.api import (
+    control,
+    health,
+    lifecycle,
+    optimizer,
+    performance_map,
+    scenario,
+    twin_diagnostics,
+    ws_telemetry,
+)
 from app.core.compute_budget import tune_interpreter
 from app.core.config import settings
 from app.core.security import auth_enabled
@@ -128,7 +138,14 @@ app.include_router(health.router)
 app.include_router(control.router)
 app.include_router(twin_diagnostics.router)
 app.include_router(ws_telemetry.router)
-# Phase 4 — Test Bench. Both routers are read-only with respect to the live simulation:
+# Phase 4 — Test Bench. These routers are read-only with respect to the live simulation:
 # a scenario runs on its own plant, and the optimizer only reads the live fault state.
 app.include_router(scenario.router)
 app.include_router(optimizer.router)
+# Steady-state performance maps. Read-only in the same sense as the two above: the map is
+# a property of the engine parameters, and /performance-maps/live-point only reads the
+# frame the simulation loop has already published.
+app.include_router(performance_map.router)
+# Phase 5 — engine life-cycle. Wired into mission start/end inside control.py; this
+# router itself only reads the persisted ledger and writes maintenance actions to it.
+app.include_router(lifecycle.router)

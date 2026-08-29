@@ -39,7 +39,7 @@ from app.ml.maintenance_advisor import MaintenanceAdvisor
 from app.ml.mission_reliability import MissionReliabilityModel
 from app.ml.rul_predictor import RULPredictor
 from app.physics.environment import atmosphere
-from app.physics.fault_models import FaultState
+from app.physics.fault_models import CYLINDER_LOCALISED_FAULTS, FAULT_TYPES, FaultState
 from app.physics.plant import EnginePlant
 from app.physics.sensor_fault_model import SensorFaultModel, SensorFaultState
 from app.sim.mission_profiles import MissionProfile, apply_scenario
@@ -114,7 +114,26 @@ class SimulationLoop:
         self.ambient_temperature_c: float | None = None
         self.active_mission_id: int | None = None
         self._true_state_snapshot: dict[str, float] = {}
+        #: Phase 5: the wear state this mission was seeded from, set by
+        #: `seed_fault_state_from_wear()` at mission start and read back at mission end
+        #: to decide which faults were "active during the mission" — see
+        #: app/api/control.py's mission-end handler.
+        self.mission_seed_wear_state: dict[str, float] = {}
+        #: Phase 5: `sim_time_s` at the moment the current mission started, so mission
+        #: end can bill `engine_lifecycle.total_operating_hours` for *simulated* engine
+        #: seconds elapsed — see the note on `sim_time_s` below for why that is not the
+        #: same number as the mission report's `duration_s`.
+        self.mission_start_sim_time_s: float = 0.0
 
+        #: Simulated seconds since this process started, advanced by `dt` every
+        #: sub-step — i.e. by wall-clock time *times `time_scale`*, not by wall-clock
+        #: time alone. This is the number an operating-hours meter on the actual engine
+        #: would read. `TelemetryFrame.timestamp` (below, in `tick()`) is deliberately a
+        #: different clock: it is `time.time()`, because the dashboard and the replay
+        #: engine need to place frames on a real timeline. A mission report's
+        #: `duration_s` comes from *that* clock, so at any time_scale other than 1x it
+        #: answers "how long did the operator wait" — the wrong question for a wear
+        #: ledger, which needs "how long did the crank turn."
         self.sim_time_s: float = 0.0
         self.time_scale: float = 1.0
         self.manual_throttle: float | None = None
@@ -190,6 +209,44 @@ class SimulationLoop:
         """The live engine's fault severities, for optimising against the engine we
         actually have rather than a pristine one."""
         return dict(self.faults.active())
+
+    # ---- Phase 5: engine life-cycle ------------------------------------------
+
+    def seed_fault_state_from_wear(self, wear_state: dict[str, float]) -> dict[str, float]:
+        """Replace the live `FaultState` with one seeded from persisted engine wear.
+
+        Called once, from `POST /control/mission/start`, with
+        `engine_lifecycle.current_wear_state`. A fresh `FaultState` is built rather than
+        mutating the live one in place, so there is nothing left over from whatever the
+        operator had injected live a moment before this mission began.
+
+        Severities are set directly through the dataclass constructor rather than via
+        `inject()`. `inject()` only *registers a ramp* — the attribute itself is not
+        written until the next `FaultState.step(dt)` call, which is exactly right for a
+        live operator command that should ease in over `ramp_seconds`, but wrong here:
+        for one sub-step (up to 100 ms of wall-clock, at 1x time scale) the freshly
+        seeded engine would read back as healthy even though the persisted wear says
+        otherwise, and the confirmation this method returns to the caller would be
+        flatly wrong before the first tick ever ran. Constructing the severities
+        directly makes the seed exact and immediate, matching what the caller is told.
+
+        The digital twin is deliberately not touched: `DigitalTwin` always flies
+        `FaultState.healthy()`, and that reference has to stay exactly zero regardless of
+        this engine's accumulated wear, or the residuals it exists to produce would stop
+        meaning anything.
+        """
+        now = time.time()
+        severities = {
+            ft: max(0.0, min(1.0, float(wear_state.get(ft, 0.0)))) for ft in FAULT_TYPES
+        }
+        fresh = FaultState(**severities)
+        for fault_type in CYLINDER_LOCALISED_FAULTS:
+            if severities[fault_type] > 1e-4:
+                fresh.cylinder_for(fault_type, self.p.n_cylinders)
+                fresh.started_at[fault_type] = now
+        self.faults = fresh
+        self.mission_seed_wear_state = dict(severities)
+        return dict(self.faults.snapshot())
 
     def set_time_scale(self, factor: float) -> None:
         self.time_scale = max(0.1, min(50.0, factor))

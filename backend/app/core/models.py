@@ -337,3 +337,20 @@ class OperatingSetpointRequest(BaseModel):
         ge=_P.injection_timing_trim_min_deg,
         le=_P.injection_timing_trim_max_deg,
     )
+
+
+# ---- Phase 5: engine life-cycle ----------------------------------------------
+
+
+class MaintenanceActionRequest(BaseModel):
+    """Simulate a maintenance action against the engine's persisted wear ledger.
+
+    Applies only to `engine_lifecycle.current_wear_state` — the value the *next*
+    mission seeds from — never to whatever mission is live right now. See
+    `app/db/lifecycle_repository.py::apply_maintenance_action` for why."""
+
+    fault_type: FaultType
+    description: str = Field(min_length=1, max_length=500)
+    #: How much severity to clear, 0-1. 1.0 is a full replacement; something less is a
+    #: partial fix (an oil change trimming bearing wear without a teardown).
+    reset_amount: float = Field(ge=0.0, le=1.0)

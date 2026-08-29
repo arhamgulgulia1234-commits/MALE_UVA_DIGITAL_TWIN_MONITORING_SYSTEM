@@ -128,3 +128,74 @@ class ScenarioRun(Base):
 
 
 Index("ix_scenario_runs_created", ScenarioRun.created_at)
+
+
+# ---- Phase 5: engine life-cycle -----------------------------------------------
+#
+# Everything above this point is scoped to one mission. This is the one table that is
+# not: it is the ledger the *engine* carries between missions, which is what lets a
+# fresh mission start already partially worn instead of pretending every flight begins
+# on a factory-new engine. `DEFAULT_ENGINE_ID` is a single constant rather than a
+# hardcoded string scattered through the repository, so the day a second simulated
+# engine is added, only that constant's caller needs to change.
+
+DEFAULT_ENGINE_ID = "primary"
+
+
+class EngineLifecycle(Base):
+    """One row per simulated engine — a single row today, keyed for more later.
+
+    `current_wear_state` is a `FaultState.snapshot()` — fault type -> 0-1 severity — and
+    is the value a new mission seeds its live `FaultState` from. `cumulative_fault_event_
+    counts` is fault type -> how many missions that fault was active in, which is a
+    different question from the per-mission `FaultEvent` rows above: those answer "when
+    did this fire and did it clear," this answers "how many times has this engine's life
+    seen it, ever."
+    """
+
+    __tablename__ = "engine_lifecycle"
+
+    engine_id: Mapped[str] = mapped_column(String(80), primary_key=True, default=DEFAULT_ENGINE_ID)
+    total_operating_hours: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    #: fault_type -> count of missions in which it was active.
+    cumulative_fault_event_counts: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    #: fault_type -> current severity (0-1), carried forward between missions.
+    current_wear_state: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    maintenance_actions: Mapped[list["MaintenanceAction"]] = relationship(
+        back_populates="engine", cascade="all, delete-orphan"
+    )
+
+
+class MaintenanceAction(Base):
+    """A logged maintenance event: some wear was reset, and why.
+
+    Free-standing rather than folded into `FaultEvent` — a fault event is something the
+    *engine* did (a fault ramping up or clearing in the physics), a maintenance action is
+    something a *maintainer* did (a part replaced, a wear value reduced). Conflating them
+    would make the maintenance history disappear every time the fault-event schema
+    changes, and vice versa.
+    """
+
+    __tablename__ = "maintenance_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    engine_id: Mapped[str] = mapped_column(
+        ForeignKey("engine_lifecycle.engine_id", ondelete="CASCADE"),
+        default=DEFAULT_ENGINE_ID,
+        nullable=False,
+    )
+    fault_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    performed_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    #: How much severity was cleared, 0-1. Not necessarily all of it — a maintenance
+    #: action can be a partial fix (an oil change trims bearing wear without a teardown).
+    wear_reset_amount: Mapped[float] = mapped_column(Float, nullable=False)
+
+    engine: Mapped[EngineLifecycle] = relationship(back_populates="maintenance_actions")
+
+
+Index("ix_maintenance_actions_engine", MaintenanceAction.engine_id, MaintenanceAction.performed_at)

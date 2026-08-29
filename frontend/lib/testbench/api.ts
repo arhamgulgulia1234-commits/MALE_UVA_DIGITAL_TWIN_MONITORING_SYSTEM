@@ -9,8 +9,11 @@
  * empty with no way to tell a rejected request from a slow one.
  */
 import type {
+  LiveOperatingPoint,
   OperatingPointResult,
   OptimizerObjective,
+  PerformanceMapResponse,
+  PerformanceMetric,
   PresetsResponse,
   ScenarioEnvelope,
   ScenarioRequest,
@@ -140,4 +143,29 @@ export function fetchMissionStatus(): Promise<{
   frames_recorded: number;
 }> {
   return request("/control/mission/status");
+}
+
+// ---- performance maps ---------------------------------------------------------
+
+export function fetchPerformanceMap(params: {
+  altitude_m: number;
+  metric: PerformanceMetric;
+}): Promise<PerformanceMapResponse> {
+  const query = new URLSearchParams({
+    altitude_m: String(Math.round(params.altitude_m)),
+    metric: params.metric,
+  });
+  return request<PerformanceMapResponse>(`/performance-maps?${query.toString()}`);
+}
+
+/**
+ * Poll the live engine's operating point for the map marker.
+ *
+ * The Test Bench opens no WebSocket by design, so this is a plain GET on a timer. It is
+ * also the one call on this page that is *expected* to come back saying "nothing here" —
+ * on the mock backend, or before the first frame — so the caller treats an unavailable
+ * point as a normal state rather than an error to surface.
+ */
+export function fetchLiveOperatingPoint(): Promise<LiveOperatingPoint> {
+  return request<LiveOperatingPoint>("/performance-maps/live-point");
 }

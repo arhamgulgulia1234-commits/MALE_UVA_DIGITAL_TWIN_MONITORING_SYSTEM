@@ -299,3 +299,77 @@ export const OBJECTIVE_LABELS: Record<OptimizerObjective, string> = {
   max_engine_life: "Max Engine Life",
   balanced: "Balanced",
 };
+
+// ---- performance maps ---------------------------------------------------------
+//
+// Mirrors backend/app/api/performance_map.py. A map is a steady-state property of the
+// engine's parameters at one altitude — it is not telemetry, and nothing in it is
+// specific to a flight, which is why it can be memoised on both sides.
+
+export type PerformanceMetric = "power" | "bsfc" | "volumetric_efficiency";
+
+export interface PerformanceMetricSpec {
+  name: PerformanceMetric;
+  label: string;
+  unit: string;
+  /** True for BSFC: the colour ramp is oriented so "better" is always the bright end. */
+  lower_is_better: boolean;
+  description: string;
+}
+
+export interface PerformanceMapLandmark {
+  rpm: number;
+  throttle_pct: number;
+  power_kw: number;
+  torque_nm: number;
+  bsfc_g_per_kwh: number | null;
+  volumetric_efficiency_pct: number;
+  fuel_flow_lph: number;
+  manifold_pressure_kpa: number;
+  afr: number;
+}
+
+export interface PerformanceMapResponse {
+  metric: PerformanceMetric;
+  metric_label: string;
+  unit: string;
+  lower_is_better: boolean;
+  description: string;
+  conditions: {
+    altitude_m: number;
+    ambient_temperature_c: number | null;
+    ambient_pressure_kpa: number;
+    density_ratio: number;
+  };
+  rpm_axis: number[];
+  throttle_axis_pct: number[];
+  /** z[loadIndex][rpmIndex]. `null` where the metric is undefined (BSFC at idle). */
+  z: (number | null)[][];
+  z_min: number | null;
+  z_max: number | null;
+  landmarks: {
+    peak_power: PerformanceMapLandmark | null;
+    best_bsfc: PerformanceMapLandmark | null;
+  };
+  axes: {
+    rpm: { min: number; max: number; label: string };
+    throttle_pct: { min: number; max: number; label: string };
+  };
+  assumptions: string[];
+}
+
+/** Where the live engine currently sits, for the marker on top of the map. */
+export interface LiveOperatingPoint {
+  available: boolean;
+  reason?: string;
+  rpm?: number;
+  throttle_pct?: number;
+  altitude_m?: number;
+  ambient_temperature_c?: number | null;
+  mission_phase?: string;
+  bsfc_g_per_kwh?: number | null;
+  manifold_pressure_kpa?: number;
+  is_replay?: boolean;
+  mission_recording: boolean;
+  timestamp?: number;
+}
