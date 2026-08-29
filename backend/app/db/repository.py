@@ -12,7 +12,7 @@ from typing import Any, Iterable
 
 from sqlalchemy import select
 
-from app.db.models import FaultEvent, Mission, TelemetryFrameRow
+from app.db.models import FaultEvent, Mission, ScenarioRun, TelemetryFrameRow
 from app.db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -217,6 +217,77 @@ class MissionRepository:
                 }
                 for e in events
             ]
+
+
+    # ---- Phase 4: Test Bench scenario runs --------------------------------
+
+    def save_scenario_run(
+        self,
+        *,
+        label: str | None,
+        altitude_m: float,
+        ambient_temperature_c: float | None,
+        duration_minutes: float,
+        verdict: str,
+        min_health_score: float | None,
+        final_rul_minutes: float | None,
+        worst_subsystem: str | None,
+        compute_seconds: float | None,
+        params: dict[str, Any],
+        summary: dict[str, Any],
+    ) -> int:
+        """Record a what-if run. Committed immediately — one row per run, not a stream."""
+        with get_session() as session:
+            run = ScenarioRun(
+                label=label,
+                altitude_m=altitude_m,
+                ambient_temperature_c=ambient_temperature_c,
+                duration_minutes=duration_minutes,
+                verdict=verdict,
+                min_health_score=min_health_score,
+                final_rul_minutes=final_rul_minutes,
+                worst_subsystem=worst_subsystem,
+                compute_seconds=compute_seconds,
+                params=params,
+                summary=summary,
+            )
+            session.add(run)
+            session.commit()
+            return run.id
+
+    def list_scenario_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        with get_session() as session:
+            runs = session.scalars(
+                select(ScenarioRun).order_by(ScenarioRun.id.desc()).limit(limit)
+            ).all()
+            return [self._scenario_row(r, include_summary=False) for r in runs]
+
+    def get_scenario_run(self, run_id: int) -> dict[str, Any] | None:
+        with get_session() as session:
+            run = session.get(ScenarioRun, run_id)
+            return self._scenario_row(run, include_summary=True) if run else None
+
+    @staticmethod
+    def _scenario_row(run: ScenarioRun, *, include_summary: bool) -> dict[str, Any]:
+        summary = run.summary or {}
+        row: dict[str, Any] = {
+            "id": run.id,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+            "label": run.label,
+            "altitude_m": run.altitude_m,
+            "ambient_temperature_c": run.ambient_temperature_c,
+            "duration_minutes": run.duration_minutes,
+            "verdict": run.verdict,
+            "min_health_score": run.min_health_score,
+            "final_rul_minutes": run.final_rul_minutes,
+            "worst_subsystem": run.worst_subsystem,
+            "compute_seconds": run.compute_seconds,
+            "headline": summary.get("headline"),
+            "params": run.params,
+        }
+        if include_summary:
+            row["summary"] = summary
+        return row
 
 
 #: Single shared repository — the simulation loop and API handlers all use this one.

@@ -85,6 +85,57 @@ than "how degraded this engine is", and every diagnosis inherits that error.
   a per-vehicle connection registry. The database schema already separates missions, so
   the change is additive.
 
+### The Test Bench becomes pre-flight mission planning
+
+Phase 4's Test Bench is, structurally, a pre-flight planning tool that happens to be flying
+a simulated engine. In a real GCS the same two endpoints answer the questions a mission
+commander asks before a sortie is authorised, and almost nothing about them changes.
+
+**What generalises unchanged.** `POST /simulate/scenario` already takes the exact inputs a
+planner has in hand — cruise altitude, forecast outside air temperature, sortie duration, a
+throttle profile, and the engine's current condition — and returns a GO/CAUTION/NO-GO
+trajectory with the specific limits that would be exceeded and when. It runs 200–750× real
+time on one core, so a planner can compare a dozen profiles interactively. The optimizer
+answers the follow-on question — *given that, what should the FADEC actually be set to?* —
+and returns the answer with a life cost attached rather than a bare number.
+
+**What has to change, and it is all upstream of the models.**
+
+| Concern | Today | In a real GCS |
+|---|---|---|
+| Engine condition | `initial_fault_severities` typed into a form | Read from the airframe's stored health state — the last mission's residuals and RUL, not an operator's guess |
+| Weather | One altitude and one temperature held constant | Forecast profile along the planned route: temperature and pressure per waypoint, feeding the same `ambient_temperature_c` argument per leg |
+| Throttle profile | Constant or a single ramp | Derived from the planned route and payload — the autopilot's own power schedule, not a hand-drawn curve |
+| Airspeed | A throttle-to-airspeed schedule in `scenario_engine.py` | The airframe's drag polar. This is the one genuine gap: it is why "max endurance" and "max range" cannot currently be separated, and why the endurance preset is honest about using the range objective |
+| Fuel | Litres burned | Reserve margin against the planned route, with diversion fuel |
+| Authority | An operator clicks "Apply to Live Engine" | A recommendation into the mission plan, subject to the same authorisation as any other pre-flight limit — see the command-path row in Security below |
+
+**Run it in its own process.** On the ground today the Test Bench shares an interpreter
+with the live simulation, and `app/core/compute_budget.py` documents what that costs — a
+multi-second search pulls the telemetry broadcast from 9.3 Hz to 7.7 Hz with a 185 ms
+worst-case gap. On an edge computer with a fraction of the cores, that trade stops being
+acceptable. The fix is structural rather than fiddly: both Phase 4 entry points are pure
+functions of their arguments (`run_scenario(params)`, `optimize_operating_point(...)`) with
+no dependency on `app.state`, so moving them behind a process pool or a separate service is
+a routing change, not a rewrite. Planning does not have to run on the aircraft at all — it
+is a ground activity, and running it on the GCS removes the contention question entirely.
+
+**Fleet dispatch is the same call with a different loop.** The optimizer already answers
+"can this engine hold cruise power at these conditions within limits?" and returns
+`feasible: false` with the failing check when it cannot. Run it across a fleet's stored
+health states and the same code answers "which airframes can fly tonight's profile, and
+which need maintenance first" — which is a dispatch decision, not a monitoring one, and is
+where a PHM system stops being a dashboard and starts saving flying hours.
+
+**What must be calibrated before any of this is trusted.** The stress-rate index behind
+every life-impact figure is a physically-motivated ordering — Arrhenius terms on head and
+oil temperature, squared vibration for fatigue, inverse-square oil pressure for film
+thickness — normalised so nominal cruise reads 1.0. It ranks operating points correctly
+against each other. Turning "+174% projected life" into an overhaul interval a maintenance
+organisation would plan against needs run-to-failure data, and the same caveat in **What
+would need genuine research** applies with full force. The right first use of this is
+comparative — *this setting is gentler than that one* — not absolute.
+
 ## Stage 4 — Fleet learning
 
 - Retrain the classifier on real labelled failures as they accumulate, rather than only on

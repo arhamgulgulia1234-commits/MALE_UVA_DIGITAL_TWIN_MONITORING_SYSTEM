@@ -90,3 +90,41 @@ class FaultEvent(Base):
 
 
 Index("ix_fault_events_mission", FaultEvent.mission_id)
+
+
+class ScenarioRun(Base):
+    """Phase 4: one Test Bench what-if run.
+
+    Deliberately a separate table from `missions`, not a flag on it. A mission is a record
+    of something that happened; a scenario run is a record of something that was *asked*.
+    Mixing them would put hypothetical flights into the maintenance history, and the
+    mission report, the replay engine and the fleet-hours count would all have to learn to
+    exclude them. Keeping them apart means none of that code changes at all.
+
+    Only the parameters and the summary are stored. The time-series is regenerable — the
+    scenario engine is deterministic given its parameters — and at up to 1800 frames a run
+    it would dominate the database for data nobody reviews frame by frame.
+    """
+
+    __tablename__ = "scenario_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    label: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
+    # Promoted to columns because the history list sorts and filters on them; everything
+    # else lives in the JSON blobs.
+    altitude_m: Mapped[float] = mapped_column(Float, nullable=False)
+    ambient_temperature_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    duration_minutes: Mapped[float] = mapped_column(Float, nullable=False)
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    min_health_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    final_rul_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    worst_subsystem: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    compute_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    params: Mapped[dict] = mapped_column(JSON, nullable=False)
+    summary: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+Index("ix_scenario_runs_created", ScenarioRun.created_at)

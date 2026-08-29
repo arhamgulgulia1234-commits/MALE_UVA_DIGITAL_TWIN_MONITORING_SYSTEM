@@ -7,6 +7,10 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { useTelemetryStore } from "@/lib/store";
 import type { Recommendation } from "@/lib/types";
 
+// `mission_reliability` on the frame is the Weibull survival estimate from
+// app/ml/mission_reliability.py — R(t) = exp(-(t_remaining / RUL)^beta) — not a frontend
+// heuristic. This component only renders it.
+
 const TONE: Record<Recommendation, "go" | "caution" | "nogo"> = {
   GO: "go",
   CAUTION: "caution",
@@ -57,7 +61,6 @@ export function MissionReliabilityCard() {
           {rel.recommendation === "NO-GO" &&
             "Reliability below safe threshold — recommend immediate abort / RTB."}
         </p>
-        {/* TODO(phase-2): score currently a heuristic of overall_score + worst fault severity; replace with app/ml/mission_reliability.py output. */}
       </div>
     </GlassCard>
   );

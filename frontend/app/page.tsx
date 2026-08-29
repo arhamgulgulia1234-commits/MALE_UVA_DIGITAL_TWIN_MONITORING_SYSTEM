@@ -14,6 +14,8 @@ import { EfficiencyTrendChart } from "@/components/dashboard/EfficiencyTrendChar
 import { MaintenanceAdvisoryPanel } from "@/components/dashboard/MaintenanceAdvisoryPanel";
 import { MissionReportView } from "@/components/dashboard/MissionReportView";
 import { ControlDeck } from "@/components/dashboard/ControlDeck";
+// Phase 4: the only change to the live dashboard — a link across to the Test Bench.
+import { ModeNav } from "@/components/nav/ModeNav";
 
 const EngineCutaway3D = dynamic(
   () =>
@@ -38,6 +40,8 @@ export default function Home() {
       <MissionHeader />
 
       <main className="mx-auto w-full max-w-[1800px] flex-1 space-y-6 px-4 py-6 sm:px-6">
+        <ModeNav className="w-fit" />
+
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.4fr_0.9fr]">
           <HealthScoreGauge />
           <EngineCutaway3D />

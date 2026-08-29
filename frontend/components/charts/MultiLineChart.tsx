@@ -22,6 +22,12 @@ interface MultiLineChartProps {
   series: SeriesDef[];
   height?: number;
   xKey?: string;
+  /**
+   * How to label an x tick. Defaults to seconds, which is what the live dashboard's
+   * 60-second strip plots. The Test Bench passes minutes — a four-hour scenario in
+   * seconds would put five-digit numbers on the axis.
+   */
+  xTickFormatter?: (value: number) => string;
 }
 
 function ChartTooltip({ active, payload, series }: any) {
@@ -42,7 +48,13 @@ function ChartTooltip({ active, payload, series }: any) {
   );
 }
 
-export function MultiLineChart({ data, series, height = 220, xKey = "t" }: MultiLineChartProps) {
+export function MultiLineChart({
+  data,
+  series,
+  height = 220,
+  xKey = "t",
+  xTickFormatter = (v) => `${v}s`,
+}: MultiLineChartProps) {
   const hasRight = series.some((s) => s.yAxisId === "right");
   return (
     <div style={{ height, width: "100%" }}>
@@ -52,7 +64,7 @@ export function MultiLineChart({ data, series, height = 220, xKey = "t" }: Multi
           <XAxis
             dataKey={xKey}
             tick={{ fill: "#5b6b82", fontSize: 10, fontFamily: "var(--font-mono)" }}
-            tickFormatter={(v) => `${v}s`}
+            tickFormatter={(v) => xTickFormatter(Number(v))}
             axisLine={{ stroke: "#1e2734" }}
             tickLine={false}
             minTickGap={40}

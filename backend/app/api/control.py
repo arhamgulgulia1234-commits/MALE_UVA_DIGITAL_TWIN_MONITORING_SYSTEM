@@ -3,6 +3,9 @@
 Phase 1/2: fault injection/clearing, throttle, time-scale, mission-phase jump.
 Phase 3: sensor-fault injection, environmental scenarios, mission recording sessions,
 and mission replay.
+Phase 4: the operating setpoint (throttle plus mixture and injection-timing trims) and
+the three optimizer-resolved mission presets. Purely additive — every Phase 1-3 route
+below is untouched.
 
 Every route here mutates the single shared SimulationLoop, and every route is guarded by
 `require_token` — one choke point for authentication, so hardening it later is a contained
@@ -14,13 +17,18 @@ import logging
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 
+from app.core import mission_presets
+from app.core.compute_budget import heavy_compute_slot
 from app.core.models import (
     AmbientTemperatureRequest,
+    ApplyPresetRequest,
     ClearFaultRequest,
     ClearSensorFaultRequest,
     FaultInjectRequest,
     MissionStartRequest,
+    OperatingSetpointRequest,
     PhaseJumpRequest,
     ReplayStartRequest,
     ScenarioRequest,
@@ -277,6 +285,90 @@ async def start_replay(req: ReplayStartRequest, request: Request) -> dict:
 @router.post("/replay/stop")
 async def stop_replay() -> dict:
     return await replay_engine.stop()
+
+
+# ---- Phase 4: operating setpoint and mission presets -------------------------
+
+
+@router.post("/setpoint")
+async def set_operating_setpoint(
+    req: OperatingSetpointRequest, request: Request
+) -> dict:
+    """Command throttle, mixture trim and/or injection-timing trim on the live engine.
+
+    This is the existing manual-throttle override widened to the two levers Phase 2 kept
+    internal. Omitted fields are left alone, so the mixture can be trimmed without
+    disturbing the throttle."""
+    sim = request.app.state.sim
+    if not hasattr(sim, "set_operating_setpoint"):
+        raise HTTPException(400, "requires the physics backend (USE_MOCK=false)")
+    if (
+        req.throttle is None
+        and req.afr_trim is None
+        and req.injection_timing_trim_deg is None
+    ):
+        raise HTTPException(400, "no setpoint field supplied")
+    setpoint = sim.set_operating_setpoint(
+        throttle=req.throttle,
+        afr_trim=req.afr_trim,
+        injection_timing_trim_deg=req.injection_timing_trim_deg,
+    )
+    return {"ok": True, "setpoint": setpoint}
+
+
+@router.get("/setpoint")
+async def get_operating_setpoint(request: Request) -> dict:
+    sim = request.app.state.sim
+    if not hasattr(sim, "operating_setpoint"):
+        raise HTTPException(400, "requires the physics backend")
+    return {"setpoint": sim.operating_setpoint()}
+
+
+@router.post("/setpoint/reset")
+async def reset_operating_setpoint(request: Request) -> dict:
+    """Return mixture and timing to their scheduled values, leaving throttle alone."""
+    sim = request.app.state.sim
+    if not hasattr(sim, "reset_trims"):
+        raise HTTPException(400, "requires the physics backend")
+    return {"ok": True, "setpoint": sim.reset_trims()}
+
+
+@router.get("/presets")
+async def list_presets() -> dict:
+    """The three mission presets, each resolved by the operating-point optimizer.
+
+    Resolving a preset is a few seconds of steady-state search, so it happens on a worker
+    thread — the event loop has a 10 Hz telemetry broadcast to keep running — and the
+    result is cached for the life of the process."""
+    async with heavy_compute_slot("presets"):
+        cards = await run_in_threadpool(mission_presets.all_preset_cards)
+    return {"presets": cards, "reference": mission_presets.reference_summary()}
+
+
+@router.post("/apply-preset")
+async def apply_preset(req: ApplyPresetRequest, request: Request) -> dict:
+    """Feed a preset's setpoint into the live simulation's manual-override mechanism."""
+    sim = request.app.state.sim
+    if not hasattr(sim, "set_operating_setpoint"):
+        raise HTTPException(400, "requires the physics backend (USE_MOCK=false)")
+
+    try:
+        # Resolve off the event loop (it may need to run the optimizer), then apply on
+        # it, so the simulation state is still only ever mutated from one thread.
+        async with heavy_compute_slot(f"preset/{req.preset_name}"):
+            setpoint = await run_in_threadpool(
+                mission_presets.preset_setpoint, req.preset_name
+            )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    applied = sim.set_operating_setpoint(
+        throttle=setpoint["throttle"],
+        afr_trim=setpoint["afr_trim"],
+        injection_timing_trim_deg=setpoint["injection_timing_trim_deg"],
+    )
+    logger.info("Applied preset '%s' to the live engine: %s", req.preset_name, applied)
+    return {"ok": True, "preset_name": req.preset_name, "setpoint": applied}
 
 
 @router.get("/replay/status")

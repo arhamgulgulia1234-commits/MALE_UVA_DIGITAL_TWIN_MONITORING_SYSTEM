@@ -6,10 +6,15 @@ import { useTelemetryStore } from "@/lib/store";
 import { HEALTHY_BANDS } from "@/lib/types";
 import { bandStatus } from "@/lib/format";
 
-// TODO(phase-2): this renders per-cylinder vibration RMS as a bar chart, which is what
-// app/sim/simulation_loop.py currently produces. Once app/physics/vibration_model.py
-// lands, swap this for a real rolling-FFT bin display (frequency bins on the x-axis)
-// using the spectral content it will expose instead of a single RMS scalar per cylinder.
+// This renders per-cylinder vibration *RMS* as bars, not a frequency spectrum, because
+// RMS is the only vibration quantity the TelemetryFrame contract carries.
+//
+// app/physics/vibration_model.py does now synthesise a real 1 kHz waveform and derive
+// spectral features from it (crest factor, high-band energy), and the PHM layer uses
+// them as residual channels — but they stay server-side, so there is nothing on the wire
+// to plot against a frequency axis. Turning this into a true FFT bin display means first
+// widening the frame contract to carry the bins; that is a schema change, not a
+// component change.
 
 export function VibrationSpectrum() {
   const latest = useTelemetryStore((s) => s.latest);

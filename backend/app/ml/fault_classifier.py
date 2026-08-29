@@ -113,6 +113,11 @@ class FaultClassifier:
         self._model: Any | None = None
         self._classes: list[str] = []
         self._feature_names: list[str] = []
+        #: Cached `feature_importances_`. The attribute is a *property* on a
+        #: RandomForest: reading it walks all 100 trees through a joblib dispatch, and at
+        #: 10 Hz that costs more than the prediction itself. The forest is fitted and
+        #: immutable, so the value cannot change — read it once.
+        self._importances: list[float] | None = None
         self._load()
 
     def _load(self) -> None:
@@ -129,6 +134,18 @@ class FaultClassifier:
 
             self._model = joblib.load(self.model_path)
             self._classes = list(self._model.classes_)
+            self._importances = None
+            # The forest was fitted with n_jobs=-1 and joblib persists that setting, so
+            # every single-sample prediction fanned 300 trees across every core through
+            # the joblib dispatcher: 26 ms per call for work that takes about one. That is
+            # pure scheduling overhead at inference time — we predict one sample, not a
+            # batch — and it was being paid ten times a second by the live loop. Forcing
+            # single-threaded inference is numerically identical (parallelism only changes
+            # who sums the trees) and roughly twenty times faster.
+            try:
+                self._model.n_jobs = 1
+            except Exception:  # pragma: no cover - defensive, some estimators are frozen
+                pass
             logger.info(
                 "Loaded fault classifier (%d classes) from %s",
                 len(self._classes),
@@ -167,6 +184,7 @@ class FaultClassifier:
             )
             self._model = None
             self._classes = []
+            self._importances = None
 
     # ---- explainability ---------------------------------------------------
 
@@ -180,17 +198,19 @@ class FaultClassifier:
         permutation study on every tick."""
         if self._model is None or not self._feature_names:
             return []
-        try:
-            importances = self._model.feature_importances_
-        except Exception:
-            return []
+        if self._importances is None:
+            try:
+                self._importances = [float(v) for v in self._model.feature_importances_]
+            except Exception:
+                return []
+        importances = self._importances
 
         scored: list[tuple[float, str, float]] = []
         for i, name in enumerate(self._feature_names):
             if i >= len(features) or i >= len(importances):
                 break
             magnitude = abs(features[i])
-            scored.append((float(importances[i]) * magnitude, name, features[i]))
+            scored.append((importances[i] * magnitude, name, features[i]))
 
         scored.sort(key=lambda t: -t[0])
         total = sum(s for s, _, _ in scored) or 1.0

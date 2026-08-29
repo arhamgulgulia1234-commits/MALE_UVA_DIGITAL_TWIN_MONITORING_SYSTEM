@@ -4,6 +4,11 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { useTelemetryStore } from "@/lib/store";
 import { formatRul } from "@/lib/format";
 
+// `rul_minutes` on the frame comes from app/ml/rul_predictor.py, which fits a linear and
+// an exponential trend to each subsystem's health indicator and extrapolates to the
+// failure threshold. Null means no degradation trend was detectable, and the panel shows
+// a dash rather than inventing a number.
+
 function rulTone(minutes: number | null): { text: string; glow: "cyan" | "amber" | "red" } {
   if (minutes === null) return { text: "text-status-cyan", glow: "cyan" };
   if (minutes > 60) return { text: "text-status-go", glow: "cyan" };
@@ -27,7 +32,6 @@ export function RULPanel() {
             ? "No active degradation — RUL estimate suppressed while nominal."
             : "Estimated time to subsystem limit at current fault severity trend."}
         </p>
-        {/* TODO(phase-2): replace linear-decay heuristic with app/ml/rul_predictor.py sequence model output. */}
       </div>
     </GlassCard>
   );

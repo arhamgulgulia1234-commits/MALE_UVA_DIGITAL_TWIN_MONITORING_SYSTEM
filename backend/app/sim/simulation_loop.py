@@ -138,6 +138,59 @@ class SimulationLoop:
     def release_throttle(self) -> None:
         self.manual_throttle = None
 
+    # ---- Phase 4: mixture and timing trims -----------------------------------
+    #
+    # Phase 2 fixed AFR and injection timing to internal schedules, so the only
+    # externally settable command was throttle. The Test Bench's operating-point
+    # optimizer recommends all three, so the manual-override mechanism is extended to
+    # carry them.
+    #
+    # Two things make this a small change rather than a change to the tick loop. The
+    # trims live on the EngineModel as commands, not integrator state, so setting them
+    # once persists — there is nothing to reapply every sub-step. And they are set on the
+    # digital twin as well as on the real engine, because a commanded operating point is
+    # an operating *condition*, not a fault: exactly the argument that already applies to
+    # ambient temperature. A twin still flying the book mixture while the engine runs
+    # trimmed would show the difference as a residual, and the PHM layer would report an
+    # operator's deliberate lean as a developing fuel-system fault.
+
+    def set_operating_setpoint(
+        self,
+        throttle: float | None = None,
+        afr_trim: float | None = None,
+        injection_timing_trim_deg: float | None = None,
+    ) -> dict:
+        """Command any subset of the operating point. `None` leaves that lever alone."""
+        if throttle is not None:
+            self.set_throttle(throttle)
+        if afr_trim is not None or injection_timing_trim_deg is not None:
+            for engine in (self.plant.engine, self.twin.plant.engine):
+                engine.set_trims(
+                    afr_trim=afr_trim,
+                    injection_timing_trim_deg=injection_timing_trim_deg,
+                )
+        return self.operating_setpoint()
+
+    def reset_trims(self) -> dict:
+        """Return mixture and timing to their scheduled values."""
+        return self.set_operating_setpoint(
+            afr_trim=0.0, injection_timing_trim_deg=0.0
+        )
+
+    def operating_setpoint(self) -> dict:
+        afr_trim, timing_trim = self.plant.engine.trims()
+        return {
+            "throttle": round(self.throttle, 4),
+            "manual_throttle": self.manual_throttle,
+            "afr_trim": round(afr_trim, 3),
+            "injection_timing_trim_deg": round(timing_trim, 3),
+        }
+
+    def current_health_state(self) -> dict[str, float]:
+        """The live engine's fault severities, for optimising against the engine we
+        actually have rather than a pristine one."""
+        return dict(self.faults.active())
+
     def set_time_scale(self, factor: float) -> None:
         self.time_scale = max(0.1, min(50.0, factor))
 

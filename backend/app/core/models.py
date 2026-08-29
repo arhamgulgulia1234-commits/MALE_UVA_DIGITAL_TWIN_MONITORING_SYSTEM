@@ -3,9 +3,16 @@ shared by the mock generator (Phase 1) and, unchanged, by the physics/ML pipelin
 (Phase 2+)."""
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.core.engine_params import PARAMS
+
+# Request bounds are sourced from the physics parameters rather than restated as
+# literals, so widening the ECU's trim authority or the modelled weather envelope cannot
+# leave the API validating against the old numbers.
+_P = PARAMS
 
 MissionPhase = Literal["climb", "cruise", "loiter", "descent"]
 
@@ -152,10 +159,20 @@ class TelemetryFrame(BaseModel):
     replay_mission_id: Optional[int] = None
 
 
+# ---- Phase 1/2 request models -----------------------------------------------
+#
+# Bounds here are load-bearing, not decoration. Without them the control handlers took
+# whatever arrived and the *simulation* silently clamped it: `POST /control/throttle
+# {"value": 5.0}` returned 200 OK with `throttle: 1.0`, and `{"value": NaN}` also
+# returned 200. A caller sending a percentage where a 0-1 fraction was expected got
+# full throttle and no indication anything was wrong. A 422 naming the field and the
+# bound is the only honest answer to an out-of-range command.
+
+
 class FaultInjectRequest(BaseModel):
     type: FaultType
-    severity: float = 0.8
-    ramp_seconds: float = 15.0
+    severity: float = Field(default=0.8, ge=0.0, le=1.0)
+    ramp_seconds: float = Field(default=15.0, ge=0.0, le=3600.0)
 
 
 class ClearFaultRequest(BaseModel):
@@ -163,11 +180,13 @@ class ClearFaultRequest(BaseModel):
 
 
 class ThrottleRequest(BaseModel):
-    value: float
+    #: A 0-1 fraction, not a percentage — the same unit the ControlDeck slider emits.
+    value: float = Field(ge=0.0, le=1.0)
 
 
 class TimeScaleRequest(BaseModel):
-    factor: float
+    #: Matches the clamp `SimulationLoop.set_time_scale` applies.
+    factor: float = Field(ge=0.1, le=50.0)
 
 
 class PhaseJumpRequest(BaseModel):
@@ -179,8 +198,8 @@ class PhaseJumpRequest(BaseModel):
 
 class SensorFaultRequest(BaseModel):
     type: SensorFaultType
-    severity: float = 0.8
-    ramp_seconds: float = 15.0
+    severity: float = Field(default=0.8, ge=0.0, le=1.0)
+    ramp_seconds: float = Field(default=15.0, ge=0.0, le=3600.0)
 
 
 class ClearSensorFaultRequest(BaseModel):
@@ -188,19 +207,133 @@ class ClearSensorFaultRequest(BaseModel):
 
 
 class MissionStartRequest(BaseModel):
-    profile_name: str = "standard"
-    notes: Optional[str] = None
+    profile_name: str = Field(default="standard", min_length=1, max_length=64)
+    notes: Optional[str] = Field(default=None, max_length=2000)
 
 
 class ReplayStartRequest(BaseModel):
-    mission_id: int
-    speed_factor: float = 1.0
+    mission_id: int = Field(ge=1)
+    speed_factor: float = Field(default=1.0, ge=0.1, le=50.0)
 
 
 class AmbientTemperatureRequest(BaseModel):
-    ambient_temperature_c: Optional[float] = None
+    #: Bounded to the same band the scenario validity envelope uses
+    #: (`scenario_ambient_min_c` / `scenario_ambient_max_c`). Outside it the thermal and
+    #: breathing models are extrapolating, and a live dashboard should not be quietly
+    #: showing numbers from outside the calibrated range.
+    ambient_temperature_c: Optional[float] = Field(
+        default=None, ge=_P.scenario_ambient_min_c, le=_P.scenario_ambient_max_c
+    )
     """None restores the ISA-derived temperature for the current altitude."""
 
 
 class ScenarioRequest(BaseModel):
     scenario: str
+
+
+# ---- Phase 4 request models (Test Bench + operating-point optimizer) ---------
+#
+# These describe *requests*, not telemetry. The TelemetryFrame contract above is
+# unchanged by Phase 4 — a scenario returns a list of ordinary TelemetryFrames, so the
+# Test Bench charts can reuse the live dashboard's components without a second schema.
+
+
+class ThrottleWaypointRequest(BaseModel):
+    """One point on a piecewise-linear throttle schedule."""
+
+    time_min: float = Field(ge=0.0, description="Minutes from the start of the scenario")
+    throttle_pct: float = Field(ge=0.0, le=100.0)
+
+
+class ScheduledFaultRequest(BaseModel):
+    """A fault that develops partway through a scenario."""
+
+    fault_type: FaultType
+    severity: float = Field(default=0.8, ge=0.0, le=1.0)
+    at_time_min: float = Field(ge=0.0)
+    ramp_minutes: float = Field(default=1.0, ge=0.0)
+
+
+class ScenarioParamsRequest(BaseModel):
+    """A what-if scenario for POST /simulate/scenario.
+
+    Throttle is a **percentage** everywhere — a bare `throttle_profile: 78` means 78%, the
+    same as a waypoint's `throttle_pct: 78`. Using a 0-1 fraction in one place and a
+    percentage in the other is the kind of inconsistency that silently produces a 0.78%
+    throttle run and a very confusing result.
+    """
+
+    altitude_m: float = 2400.0
+    ambient_temperature_c: Optional[float] = Field(
+        default=None,
+        description="Null follows the ISA temperature for this altitude (standard day).",
+    )
+    duration_minutes: float = 20.0
+    throttle_profile: Union[float, list[ThrottleWaypointRequest]] = Field(
+        default=78.0,
+        description="Constant percentage, or waypoints interpolated linearly between.",
+    )
+    initial_fault_severities: dict[str, float] = Field(
+        default_factory=dict,
+        description="Wear the engine already carries at t=0, as fault_type -> 0-1.",
+    )
+    injected_faults_during_scenario: list[ScheduledFaultRequest] = Field(
+        default_factory=list
+    )
+    label: Optional[str] = Field(default=None, max_length=160)
+    save: bool = Field(
+        default=True,
+        description="Record the parameters and summary in the scenario_runs table.",
+    )
+    include_frames: bool = Field(
+        default=True,
+        description="Return the full time-series. Set false for a summary-only run.",
+    )
+
+
+OptimizerObjective = Literal["max_range", "max_power", "max_engine_life", "balanced"]
+
+
+class OperatingPointRequest(BaseModel):
+    """A request for POST /optimize/operating-point."""
+
+    altitude_m: float = Field(
+        default=0.0, ge=_P.scenario_altitude_min_m, le=_P.scenario_altitude_max_m
+    )
+    ambient_temperature_c: Optional[float] = Field(
+        default=None, ge=_P.scenario_ambient_min_c, le=_P.scenario_ambient_max_c
+    )
+    objective: OptimizerObjective = "balanced"
+    use_current_engine_health: bool = Field(
+        default=False,
+        description=(
+            "Optimise for the engine on the live simulation right now — its actual "
+            "fault severities — instead of a pristine one."
+        ),
+    )
+
+
+class ApplyPresetRequest(BaseModel):
+    preset_name: str = Field(min_length=1, max_length=64)
+
+
+class OperatingSetpointRequest(BaseModel):
+    """Manual override of the live simulation's operating setpoint.
+
+    Every field is optional and `None` means "leave this one alone", so a caller can trim
+    the mixture without disturbing the throttle.
+    """
+
+    throttle: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    #: Bounded to the ECU's authority — the same clamps `EngineModel.step` applies
+    #: (`afr_trim_min`/`afr_trim_max`, `injection_timing_trim_min_deg`/`_max_deg`).
+    #: Accepting a wider value and clamping it silently made the response echo a
+    #: setpoint the engine was never going to run.
+    afr_trim: Optional[float] = Field(
+        default=None, ge=_P.afr_trim_min, le=_P.afr_trim_max
+    )
+    injection_timing_trim_deg: Optional[float] = Field(
+        default=None,
+        ge=_P.injection_timing_trim_min_deg,
+        le=_P.injection_timing_trim_max_deg,
+    )

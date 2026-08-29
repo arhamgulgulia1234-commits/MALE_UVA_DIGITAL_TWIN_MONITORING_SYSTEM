@@ -174,8 +174,17 @@ class EnginePlant:
         airspeed_ms: float,
         fault_state: FaultState,
         ambient_temperature_c: float | None = None,
+        generate_vibration: bool = True,
     ) -> EngineOutputs:
-        """Advance every physics model by one integration sub-step."""
+        """Advance every physics model by one integration sub-step.
+
+        `generate_vibration=False` skips the 1 kHz vibration synthesis for this sub-step.
+        The vibration model runs at its own sample rate and is independent of the ODE
+        integration, so the caller is free to batch it into one longer window instead —
+        which is what app/sim/scenario_engine.py does, because synthesising a 20 ms window
+        of noise is dominated by NumPy call overhead and accounts for roughly 40% of a
+        headless scenario's runtime. The live loop leaves the default alone and is
+        unaffected."""
         eng: EngineOutputs = self.engine.step(
             dt,
             throttle,
@@ -198,12 +207,16 @@ class EnginePlant:
             dt, rpm=eng.rpm, oil_temp_c=therm.oil_temp_c, fault_state=fault_state
         )
         elec: ElectricalOutputs = self.electrical.step(dt, eng.rpm, fault_state)
-        vib = self.vibration.generate_window(
-            dt,
-            rpm=eng.rpm,
-            fault_state=fault_state,
-            misfire_active=any(eng.misfire_events),
-            with_features=False,
+        vib = (
+            self.vibration.generate_window(
+                dt,
+                rpm=eng.rpm,
+                fault_state=fault_state,
+                misfire_active=any(eng.misfire_events),
+                with_features=False,
+            )
+            if generate_vibration
+            else None
         )
 
         self.state.rpm = eng.rpm
@@ -219,7 +232,8 @@ class EnginePlant:
         self.state.cht_c = therm.cht_c
         self.state.oil_temp_c = therm.oil_temp_c
         self.state.oil_pressure_kpa = lub.oil_pressure_kpa
-        self.state.vibration_rms = vib.rms_per_cylinder
+        if vib is not None:
+            self.state.vibration_rms = vib.rms_per_cylinder
         self.state.battery_voltage_v = elec.battery_voltage_v
         self.state.alternator_output_v = elec.alternator_output_v
         self.state.injection_timing_deg = eng.injection_timing_deg

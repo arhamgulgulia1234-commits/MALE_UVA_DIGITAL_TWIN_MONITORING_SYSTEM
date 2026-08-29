@@ -53,6 +53,18 @@ def isa_temperature_k(altitude_m: float) -> float:
     return T_TROPOPAUSE_K
 
 
+#: Phase 4: size-one memo for `atmosphere()`.
+#:
+#: A Test Bench scenario holds altitude and ambient temperature constant for its whole
+#: run, and every integration sub-step evaluates this function about six times (engine,
+#: breathing derate, turbo, thermal). Caching the last result turns those into one tuple
+#: comparison and roughly halves the cost of a headless scenario. The live simulation
+#: climbs continuously, so it misses every time and pays only that comparison. This is
+#: safe because `AtmosphereState` is frozen — callers cannot mutate a shared instance.
+_atm_cache_key: tuple[float, float | None] | None = None
+_atm_cache_value: "AtmosphereState | None" = None
+
+
 def atmosphere(
     altitude_m: float, ambient_temperature_c: float | None = None
 ) -> AtmosphereState:
@@ -65,6 +77,11 @@ def atmosphere(
     and the cooling system has a smaller temperature gradient to work against, on top of
     whatever the altitude was already costing.
     """
+    global _atm_cache_key, _atm_cache_value
+    key = (altitude_m, ambient_temperature_c)
+    if _atm_cache_value is not None and _atm_cache_key == key:
+        return _atm_cache_value
+
     h = max(0.0, altitude_m)
 
     if h <= TROPOPAUSE_M:
@@ -85,12 +102,14 @@ def atmosphere(
         temperature = max(200.0, ambient_temperature_c + 273.15)
 
     density = pressure / (R_AIR * temperature)
-    return AtmosphereState(
+    state = AtmosphereState(
         altitude_m=h,
         temperature_k=temperature,
         pressure_pa=pressure,
         density_kg_per_m3=density,
     )
+    _atm_cache_key, _atm_cache_value = key, state
+    return state
 
 
 def density_ratio(

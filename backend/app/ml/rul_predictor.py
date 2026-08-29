@@ -39,6 +39,7 @@ class RULPredictor:
         max_minutes: float = 600.0,
         min_slope_per_min: float = 0.05,
         smoothing_tau_s: float = 20.0,
+        smoothing_tau_fall_s: float = 3.0,
     ) -> None:
         self.window_s = window_minutes * 60.0
         self.min_samples = min_samples
@@ -48,6 +49,19 @@ class RULPredictor:
         #: it produces the wild swings you get from dividing by a near-zero slope.
         self.min_slope_per_min = min_slope_per_min
         self.smoothing_tau_s = smoothing_tau_s
+        #: Smoothing is deliberately asymmetric: a *rising* RUL is damped with
+        #: `smoothing_tau_s` to stop the readout flickering, but a *falling* one is let
+        #: through on this much shorter constant.
+        #:
+        #: Symmetric smoothing was actively dangerous here. The estimate is seeded at the
+        #: `max_minutes` clamp (600) the first time a trend becomes fittable, and a 20 s
+        #: constant cannot come down from there faster than a fault can develop. On a 45 s
+        #: bearing-wear ramp the underlying fit said **0.0 minutes** while the frame
+        #: reported **409 minutes** — the engine sitting at the failure threshold and the
+        #: dashboard showing nearly seven hours of life. The faster the degradation, the
+        #: more optimistic the readout became, which is precisely backwards. Lag is
+        #: acceptable when the news is getting better; it is not when it is getting worse.
+        self.smoothing_tau_fall_s = smoothing_tau_fall_s
         self._history: dict[str, deque[tuple[float, float]]] = {}
         self._smoothed: float | None = None
         self._last_time_s: float | None = None
@@ -69,7 +83,14 @@ class RULPredictor:
             estimate = self._estimate_for(subsystem, hist)
             if estimate.minutes is None:
                 continue
-            if best is None or estimate.minutes < (best.minutes or math.inf):
+            # `best.minutes` is never None here — the `continue` above filters those out
+            # — so compare it directly. It used to read `(best.minutes or math.inf)`,
+            # which treats a legitimate RUL of exactly 0.0 as "no estimate" because 0.0
+            # is falsy: the instant a subsystem reached the failure threshold and
+            # correctly reported 0 minutes, any healthier subsystem's longer estimate
+            # replaced it. The readout jumped *up* at the exact moment it should have
+            # bottomed out.
+            if best is None or estimate.minutes < best.minutes:
                 best = estimate
 
         dt_s = 0.0 if self._last_time_s is None else max(0.0, sim_time_s - self._last_time_s)
@@ -82,11 +103,16 @@ class RULPredictor:
         # Smooth the reported figure. The underlying least-squares fit is jumpy while a
         # fault is still ramping, and an RUL readout that leaps between 25 and 600 minutes
         # is worse than useless to an operator deciding whether to abort.
-        raw = best.minutes or 0.0
+        raw = best.minutes if best.minutes is not None else 0.0
         if self._smoothed is None:
             self._smoothed = raw
         else:
-            alpha = 1.0 - math.exp(-dt_s / max(1e-6, self.smoothing_tau_s))
+            tau = (
+                self.smoothing_tau_s
+                if raw >= self._smoothed
+                else self.smoothing_tau_fall_s
+            )
+            alpha = 1.0 - math.exp(-dt_s / max(1e-6, tau))
             self._smoothed += (raw - self._smoothed) * alpha
 
         return RULEstimate(

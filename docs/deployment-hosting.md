@@ -86,7 +86,47 @@ Three consequences worth knowing before a live demo, none of them bugs:
 **It spins down after ~15 minutes of inactivity.** The first request afterwards takes
 roughly 50 seconds to wake the container. The dashboard will sit on *Reconnecting* for
 that whole time — the reconnecting client handles it, but it looks broken to an audience.
-**Hit the URL a minute before you present**, or put a cron on `/health` every 10 minutes.
+**Hit the URL a minute before you present**, or keep it awake with an external monitor —
+see below.
+
+### Keeping it awake with UptimeRobot
+
+`/health` answers **both `GET` and `HEAD`**, which is what makes this work. UptimeRobot's
+HTTP(s) monitor sends `HEAD` first, to avoid pulling a response body; FastAPI does *not*
+add `HEAD` to a `GET` route automatically (unlike a plain Starlette route), so a
+`@router.get`-only health endpoint answers `HEAD` with **405** and the monitor reports the
+service as down while a browser shows it perfectly healthy. `app/api/health.py` declares
+both methods on one handler for exactly this reason.
+
+Setup:
+
+| Field | Value |
+| --- | --- |
+| Monitor type | HTTP(s) |
+| URL | `https://<your-service>.onrender.com/health` |
+| Monitoring interval | **5 minutes** |
+
+Five minutes matters: Render sleeps after ~15 minutes idle, so the interval has to be
+comfortably under that. Five is the shortest the UptimeRobot free tier allows and leaves
+room for a missed check.
+
+Optional, if you want the check to assert the service is really serving rather than just
+returning 200 — set *Advanced → Keyword* to `ok`, which forces a `GET` and matches
+`{"status":"ok"}`.
+
+Verify both methods before trusting the monitor:
+
+```bash
+curl -i  https://<your-service>.onrender.com/health   # GET  -> 200 {"status":"ok"}
+curl -I  https://<your-service>.onrender.com/health   # HEAD -> 200, empty body
+```
+
+A 405 on the second line means the deployed build predates this change.
+
+Two caveats. This keeps the *container* awake, which is the point — but it does not keep a
+**WebSocket** open; a dashboard left idle overnight still relies on its own reconnect. And
+free-tier Render instances have monthly run-time limits, so pinging one awake around the
+clock consumes that budget faster than letting it sleep.
 
 **The simulation only runs while the service is awake.** The mission clock and any
 recording stop when it sleeps and resume from wherever they were. Not a problem for a

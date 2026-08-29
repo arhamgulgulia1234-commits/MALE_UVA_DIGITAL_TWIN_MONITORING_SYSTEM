@@ -50,6 +50,7 @@ class DigitalTwin:
         altitude_m: float,
         airspeed_ms: float,
         ambient_temperature_c: float | None = None,
+        generate_vibration: bool = True,
     ) -> None:
         """Step the reference engine with the same commands, always fault-free.
 
@@ -63,6 +64,7 @@ class DigitalTwin:
             airspeed_ms,
             self.healthy,
             ambient_temperature_c=ambient_temperature_c,
+            generate_vibration=generate_vibration,
         )
 
     def compare(self, real_state: PlantState) -> TwinComparison:

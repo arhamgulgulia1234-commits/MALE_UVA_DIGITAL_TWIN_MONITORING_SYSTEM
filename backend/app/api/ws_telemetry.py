@@ -35,8 +35,14 @@ class ConnectionManager:
             self.active.remove(ws)
 
     async def broadcast_json(self, payload: dict) -> None:
+        # Iterate a snapshot. `send_json` awaits, and during that await the endpoint
+        # coroutine for a *different* socket can notice its client has gone and call
+        # `disconnect()`, which removes an entry from this same list. Mutating a list
+        # while a `for` walks it by index makes the loop skip whichever element shifts
+        # into the vacated slot, so a client that is still connected silently misses that
+        # frame. Rapid tab open/close is exactly the workload that triggers it.
         dead: list[WebSocket] = []
-        for ws in self.active:
+        for ws in list(self.active):
             try:
                 await ws.send_json(payload)
             except Exception:

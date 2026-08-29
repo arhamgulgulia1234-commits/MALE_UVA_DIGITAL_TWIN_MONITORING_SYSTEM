@@ -12,3 +12,8 @@ matplotlib==3.9.2
 
 # Phase 3 — mission persistence, replay and reporting
 SQLAlchemy==2.0.36
+
+# Phase 4 — operating-point optimisation.
+# SciPy already arrives as a scikit-learn dependency, but Phase 4 imports it directly
+# (scipy.optimize.minimize), so it is pinned here rather than relied on transitively.
+scipy==1.14.1

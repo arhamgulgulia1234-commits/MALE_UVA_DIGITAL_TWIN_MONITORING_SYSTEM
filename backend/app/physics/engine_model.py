@@ -14,10 +14,15 @@ integrates one sub-step of the following chain:
     J * domega/dt = T_brake - T_load(omega)      (fixed-pitch propeller load)
 
 Exhaust gas temperature comes from the combustion heat that does *not* become indicated
-work, spread over the charge mass, shaped by an AFR curve that peaks lean of
-stoichiometric. Because aero practice is to run rich of peak at high power, leaning the
-mixture (a clogged injector, a weak spark burning late) moves EGT *up* toward that peak —
-which is the fault signature the dashboard shows.
+work, spread over the charge mass, shaped by an AFR curve that peaks slightly lean of
+stoichiometric at `afr_peak_egt`. Because aero practice is to run rich of peak at high
+power, leaning the mixture (a clogged injector, a weak spark burning late) moves EGT *up*
+toward that peak — which is the fault signature the dashboard shows.
+
+Past the peak it comes back down: a cylinder leaned far enough — a badly clogged
+injector at high severity drives one about 3 AFR lean of peak — reads *cooler* than its
+neighbours, not hotter. Both halves of that curve are real, and the per-cylinder EGT
+spread is what identifies the fault in either direction.
 """
 from __future__ import annotations
 
@@ -70,6 +75,13 @@ class EngineModel:
         self._egt_c: list[float] = [300.0] * params.n_cylinders
         self._rng = random.Random(seed)
         self._initialised = False
+        # Phase 4: externally commanded trims. These are *commands*, not integrator
+        # state, so `reset()` deliberately leaves them alone — exactly like the throttle,
+        # which also survives a reset. app/ml/operating_point_optimizer.py searches over
+        # them and app/sim/simulation_loop.py exposes them through the manual-override
+        # mechanism.
+        self.afr_trim: float = 0.0                     # AFR units; positive = leaner
+        self.injection_timing_trim_deg: float = 0.0    # crank degrees; positive = advance
         # Phase 3 state
         self.injection_timing_deg: float = params.injection_timing_nominal_deg
         self.combustion_instability_pct: float = 0.0
@@ -77,6 +89,25 @@ class EngineModel:
         self._imep_baseline: float | None = None
         self._transient_active: bool = False
         self._prev_map_kpa: float = self.map_kpa
+
+    def set_trims(
+        self,
+        afr_trim: float | None = None,
+        injection_timing_trim_deg: float | None = None,
+    ) -> None:
+        """Command a mixture and/or injection-timing offset from the internal schedule.
+
+        `None` leaves that trim where it is. Both are clamped to the ECU's authority
+        inside `step()`, so nothing outside this class can command past the lean misfire
+        limit or an unbounded timing advance."""
+        if afr_trim is not None:
+            self.afr_trim = float(afr_trim)
+        if injection_timing_trim_deg is not None:
+            self.injection_timing_trim_deg = float(injection_timing_trim_deg)
+
+    def trims(self) -> tuple[float, float]:
+        """(afr_trim, injection_timing_trim_deg) as currently commanded."""
+        return self.afr_trim, self.injection_timing_trim_deg
 
     def _compute_imep_cov(self) -> float:
         """Coefficient of variation of IMEP over the rolling window, as a percentage."""
@@ -133,6 +164,16 @@ class EngineModel:
         base = p.afr_target_cruise + (p.afr_target_wot - p.afr_target_cruise) * _clamp(
             throttle, 0.0, 1.0
         )
+        # Phase 4: commanded mixture trim on top of the schedule. Leaning saves fuel and
+        # moves EGT toward its peak; enriching costs fuel but cools the head, which is
+        # precisely the lever an operating-point optimizer needs when CHT is the binding
+        # constraint. Clamped to the ECU's authority, so a trim can never command past
+        # the lean misfire limit.
+        base = _clamp(
+            base + _clamp(self.afr_trim, p.afr_trim_min, p.afr_trim_max),
+            p.afr_command_min,
+            p.afr_command_max,
+        )
         afrs = [base] * p.n_cylinders
         # A clogged injector starves one cylinder -> that cylinder runs lean.
         if fs.fuel_injector_clog > 1e-4:
@@ -142,19 +183,44 @@ class EngineModel:
             )
         return afrs
 
-    def _egt_afr_shape(self, afr: float) -> float:
-        """EGT-vs-AFR curve.
+    def _afr_eta_comb_penalty(self, afr: float) -> float:
+        """Combustion-completeness penalty for a charge away from stoichiometric.
 
-        Peaks at `afr_peak_egt` (lean of stoichiometric) and is normalised to 1.0 at
-        `afr_egt_reference`, so the multiplier stays near unity through the normal
-        operating range and leaning the mixture lifts EGT by a realistic ~10%, not by a
-        factor of two."""
+        Shared by `step()` (where it derates indicated work) and `_egt_afr_shape` (where
+        it is divided back out, so the EGT curve is not shaped by it twice)."""
+        return _clamp(1.0 - 0.030 * abs(afr - self.p.afr_stoich), 0.55, 1.0)
+
+    def _egt_afr_shape(self, afr: float) -> float:
+        """Multiplier that makes the *net* EGT rise follow a bell peaking at
+        `afr_peak_egt`.
+
+        The caller computes an exhaust temperature rise proportional to
+        `eta_comb * m_fuel / m_charge`, and both of those already vary strongly with AFR:
+        `m_fuel/m_charge` falls monotonically as 1/(AFR+1), and the combustion penalty
+        falls either side of stoichiometric. A bare bell multiplied on top of those does
+        *not* peak where the bell peaks — it peaks well rich of it, because the
+        monotonic 1/(AFR+1) term dominates a bell this wide.
+
+        That mattered in practice, not just on paper. Before this was corrected the model
+        peaked at AFR ~14.5 while `afr_peak_egt` claimed 16.0, so `afr_command_max` —
+        documented as "just lean of the EGT peak" and used as the optimizer's lean
+        authority — actually sat about two AFR units *lean* of peak, in a region where
+        the model reported EGT falling as the mixture was leaned further.
+
+        So this divides both AFR-dependent terms back out and returns the bell itself.
+        The net rise is then exactly `bell(AFR)` times the combustion-quality factors
+        that are *not* mixture-related (spark, injection timing, misfire), which keep
+        modulating EGT independently. Normalised to 1.0 at `afr_egt_reference` so the
+        absolute EGT calibration through the normal operating band is unchanged."""
         p = self.p
 
         def bell(a: float) -> float:
             return math.exp(-(((a - p.afr_peak_egt) / p.afr_egt_width) ** 2))
 
-        return bell(afr) / bell(p.afr_egt_reference)
+        ref = p.afr_egt_reference
+        charge_term = (afr + 1.0) / (ref + 1.0)
+        eta_term = self._afr_eta_comb_penalty(ref) / self._afr_eta_comb_penalty(afr)
+        return charge_term * eta_term * bell(afr) / bell(ref)
 
     def _cylinder_trim_c(self, index: int) -> float:
         """Deterministic cylinder-to-cylinder EGT spread from build tolerance.
@@ -264,18 +330,34 @@ class EngineModel:
         timing_error_deg = (
             p.f_injection_timing_drift_deg * fault_state.injection_timing_drift
         )
-        self.injection_timing_deg = p.injection_timing_nominal_deg - timing_error_deg
+        # Phase 4: commanded timing trim (positive = advance). The nominal angle is MBT,
+        # so *any* departure from it costs combustion efficiency; what the trim buys is a
+        # CHT-versus-EGT trade. Advance keeps heat in the cylinder (hotter head, cooler
+        # exhaust), retard sends it out of the valve (cooler head, hotter exhaust).
+        timing_trim_deg = _clamp(
+            self.injection_timing_trim_deg,
+            p.injection_timing_trim_min_deg,
+            p.injection_timing_trim_max_deg,
+        )
+        self.injection_timing_deg = (
+            p.injection_timing_nominal_deg + timing_trim_deg - timing_error_deg
+        )
 
         for i in range(p.n_cylinders):
             eta = p.eta_comb_nominal
             # Mixture that is far off stoichiometric burns less completely.
-            afr_penalty = 1.0 - 0.030 * abs(afrs[i] - p.afr_stoich)
-            eta *= _clamp(afr_penalty, 0.55, 1.0)
+            eta *= self._afr_eta_comb_penalty(afrs[i])
             if i == spark_idx:
                 eta *= 1.0 - p.f_spark_eta_comb_loss * fault_state.spark_degradation
-            if i == timing_idx:
+            # Departure from MBT for *this* cylinder: the commanded trim, plus the
+            # fault's local drift on whichever cylinder it targets. With no trim
+            # commanded this reduces exactly to the Phase 3 behaviour.
+            timing_departure_deg = abs(
+                timing_trim_deg - (timing_error_deg if i == timing_idx else 0.0)
+            )
+            if timing_departure_deg > 1e-9:
                 eta *= _clamp(
-                    1.0 - p.injection_timing_sensitivity * abs(timing_error_deg), 0.5, 1.0
+                    1.0 - p.injection_timing_sensitivity * timing_departure_deg, 0.5, 1.0
                 )
 
             misfired = False
@@ -288,17 +370,37 @@ class EngineModel:
             misfire_events.append(misfired)
 
         # ---- 4. indicated work -------------------------------------------------
-        # Late/weak spark converts less of the released heat into piston work.
-        eta_thermal = p.eta_thermal_indicated * (
-            1.0 - p.f_spark_eta_thermal_loss * fault_state.spark_degradation
-        )
+        # Late/weak spark converts less of the released heat into piston work, and the
+        # work it fails to extract leaves through the exhaust valve instead — which is
+        # why a fouled plug reads *hotter* on that cylinder's EGT probe while making
+        # less power.
+        #
+        # This is per cylinder, and that matters. `spark_degradation` is a
+        # cylinder-localised fault (see fault_models.CYLINDER_LOCALISED_FAULTS), so
+        # applying its work-extraction penalty engine-wide put the extra exhaust heat on
+        # all four cylinders: at severity 1.0 the three *healthy* cylinders read +134 C
+        # while the genuinely faulty one read -102 C. That is the fault signature exactly
+        # inverted and smeared onto the wrong cylinders, and it also over-penalised brake
+        # power by roughly 4x, because every cylinder was paying one cylinder's loss.
+        eta_thermal_per_cyl = [
+            p.eta_thermal_indicated
+            * (
+                1.0 - p.f_spark_eta_thermal_loss * fault_state.spark_degradation
+                if i == spark_idx
+                else 1.0
+            )
+            for i in range(p.n_cylinders)
+        ]
 
         fuel_power_per_cyl = [
             m_fuel_per_cyl[i] * p.fuel_lhv_j_per_kg * eta_comb[i]
             for i in range(p.n_cylinders)
         ]
         released_power_w = sum(fuel_power_per_cyl)
-        indicated_power_w = released_power_w * eta_thermal
+        indicated_power_w = sum(
+            fuel_power_per_cyl[i] * eta_thermal_per_cyl[i]
+            for i in range(p.n_cylinders)
+        )
 
         if cycles_per_s > 1e-6:
             imep_pa = indicated_power_w / (p.displacement_m3 * cycles_per_s)
@@ -392,6 +494,9 @@ class EngineModel:
         head_split = p.heat_to_head_fraction * (
             afr_charge / p.afr_target_cruise
         ) ** p.heat_to_head_afr_exponent
+        # Advanced timing burns earlier, so more of the residual heat is still in the
+        # cylinder when the exhaust valve opens: the head takes it instead of the pipe.
+        head_split += p.injection_timing_head_split_per_deg * timing_trim_deg
         head_split = _clamp(head_split, 0.15, 0.85)
 
         residual_power_w = max(0.0, released_power_w - indicated_power_w)
@@ -401,7 +506,7 @@ class EngineModel:
         egt_target: list[float] = []
         for i in range(p.n_cylinders):
             residual_i = max(
-                0.0, fuel_power_per_cyl[i] * (1.0 - eta_thermal)
+                0.0, fuel_power_per_cyl[i] * (1.0 - eta_thermal_per_cyl[i])
             ) * p.heat_to_exhaust_fraction
             charge_flow_i = max(1e-6, m_air_per_cyl + m_fuel_per_cyl[i])
             delta_t = residual_i / (charge_flow_i * p.cp_exhaust_j_per_kg_k)
@@ -409,9 +514,13 @@ class EngineModel:
             t_k = intake_temp_k + delta_t
             # Blow-by adds a little exhaust heat across all cylinders.
             t_k += p.f_ring_wear_egt_rise_k * fault_state.piston_ring_wear
-            # Retarded injection burns late, so more heat leaves through the valve.
-            if i == timing_idx:
-                t_k += p.injection_timing_egt_per_deg * abs(timing_error_deg)
+            # Retarded injection burns late, so more heat leaves through the valve —
+            # and a commanded advance does the opposite. `retard_deg` is the net retard
+            # from nominal for this cylinder, so it is negative when timing is advanced.
+            retard_deg = (
+                timing_error_deg if i == timing_idx else 0.0
+            ) - timing_trim_deg
+            t_k += p.injection_timing_egt_per_deg * retard_deg
             t_k += self._cylinder_trim_c(i)
             egt_target.append(t_k - 273.15)
 
