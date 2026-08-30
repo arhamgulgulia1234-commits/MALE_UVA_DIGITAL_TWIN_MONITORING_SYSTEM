@@ -284,6 +284,12 @@ export interface SensorFaultMeta {
   label: string;
   description: string;
   channel: string;
+  /**
+   * What kind of corruption this simulates, in a few words — for the injection button's
+   * subtitle. The button's title already names the probe/channel (`label`), so this adds
+   * information rather than repeating it: the *shape* of the corruption, not what it's on.
+   */
+  corruptionKind: string;
 }
 
 /**
@@ -298,30 +304,35 @@ export const SENSOR_FAULT_CATALOG: SensorFaultMeta[] = [
     label: "EGT Probe Drift",
     description: "Thermocouple reads progressively high — combustion is fine",
     channel: "EGT",
+    corruptionKind: "Slow upward offset",
   },
   {
     type: "oil_pressure_sensor_noise",
     label: "Oil Press. Sensor Noise",
     description: "Excess noise and dropouts on an otherwise good transducer",
     channel: "Oil pressure",
+    corruptionKind: "Increased readout noise",
   },
   {
     type: "rpm_sensor_stuck",
     label: "RPM Sensor Stuck",
     description: "Tachometer reading freezes while the engine keeps changing speed",
     channel: "RPM",
+    corruptionKind: "Frozen at last value",
   },
   {
     type: "cht_sensor_primary_drift",
     label: "CHT Probe #1 Drift",
     description: "Primary cylinder head probe reads progressively high — the secondary probe and the fused estimate disagree with it",
     channel: "CHT",
+    corruptionKind: "Slow upward offset",
   },
   {
     type: "cht_sensor_secondary_drift",
     label: "CHT Probe #2 Drift",
     description: "Secondary cylinder head probe reads progressively high — the primary probe and the fused estimate disagree with it",
     channel: "CHT",
+    corruptionKind: "Slow upward offset",
   },
 ];
 

@@ -1,66 +1,92 @@
 "use client";
 
 import { Html } from "@react-three/drei";
-import { useEffect, useState } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
+import * as THREE from "three";
 import { useTelemetryStore } from "@/lib/store";
+import { ENGINE_PARTS_BY_ID } from "@/lib/enginePartsRegistry";
+import { usePartSelection } from "./partSelection";
 import { LAYOUT, SENSOR_MOUNTS } from "./engine3dUtils";
 
 /**
- * Callout labels in the dashed-box style of turbo-flow-diagram.png, plus sensor-fault
- * badges.
+ * Callout labels for the Flow Diagram view, plus sensor-fault badges.
  *
- * Unlike everything else in this scene, labels are DOM (drei `<Html>`) and therefore do
- * re-render — but only when the label set actually changes, which is on a view-mode
- * toggle or when a sensor fault appears. The live numeric values inside them are
- * throttled to 4 Hz rather than updated per frame: they are text, and no one can read
- * text that changes 60 times a second.
+ * Flow Diagram labels used to be `<Html>` nodes anchored directly at each part's 3D
+ * point, which meant two labels could visually collide whenever the camera angle put
+ * their anchors close together on screen. They are now fixed screen-space "slots" — two
+ * rows pinned to the top/bottom of the canvas, laid out once from the canvas size — each
+ * connected to its part by a thin leader line whose endpoint is reprojected every frame.
+ * The slot itself never moves, so two labels can never overlap regardless of camera
+ * angle; only the line's far end tracks the orbit.
+ *
+ * This is all done with one `<Html fullscreen>` wrapper rather than one `<Html>` per
+ * label: `fullscreen` centers its content on the *anchor's* projected screen position,
+ * and the anchor here is the overlay's own group, which sits at the world origin — the
+ * same point `OrbitControls` orbits around. That keeps the fullscreen div aligned with
+ * the canvas at every camera angle, so plain CSS pixel coordinates inside it line up
+ * with projected 3D points computed the same way (see `projectToPixels`).
+ *
+ * Unlike everything else in this scene, labels are DOM and therefore do re-render — but
+ * only on a view-mode toggle, a hover change, or a sensor fault appearing. Leader-line
+ * endpoints are pushed straight into the SVG DOM via refs inside `useFrame`, same as
+ * every other per-frame binding in this directory: text/lines that must track the camera
+ * every frame do so without going through React state.
  */
 
-interface Callout {
+interface FlowCallout {
   key: string;
-  position: [number, number, number];
+  /** Registry id — clicking the label opens this part's existing PartDetailPanel. */
+  partId: string;
   title: string;
-  body: string;
 }
 
-const CALLOUTS: Callout[] = [
-  {
-    key: "turbo",
-    position: [LAYOUT.turbo.x - 0.15, LAYOUT.turbo.y + 0.62, 0],
-    title: "TURBOCHARGER",
-    body: "Exhaust-driven turbine on a shared shaft with the intake compressor.",
-  },
-  {
-    key: "throttle",
-    position: [LAYOUT.throttleBody.x - 0.1, LAYOUT.throttleBody.y - 0.5, 0],
-    title: "THROTTLE BODY",
-    body: "Regulates airflow into the intake plenum.",
-  },
-  {
-    key: "intake",
-    position: [0.35, LAYOUT.intakePlenumY + 0.5, 0],
-    title: "INTAKE MANIFOLD",
-    body: "Pressurised air from the compressor is distributed to the cylinders.",
-  },
-  {
-    key: "cylinders",
-    position: [0.6, 0.2, LAYOUT.cylinderOuter + 0.55],
-    title: "CYLINDERS",
-    body: "Air-cooled opposed four. Fin colour tracks that cylinder's EGT.",
-  },
-  {
-    key: "exhaust",
-    position: [0.55, LAYOUT.exhaustCollectorY - 0.42, -0.5],
-    title: "EXHAUST MANIFOLD",
-    body: "Collects from all four cylinders and drives the turbine.",
-  },
-  {
-    key: "wastegate",
-    position: [LAYOUT.wastegate.x - 0.35, LAYOUT.wastegate.y - 0.42, 0],
-    title: "WASTE GATE",
-    body: "Bypasses exhaust around the turbine to regulate boost.",
-  },
+/**
+ * The parts shown in the Flow Diagram. Order matters only in that it drives the
+ * alternating top/bottom row assignment below — a stable, camera-independent split, so a
+ * label never jumps rows mid-orbit.
+ */
+const FLOW_CALLOUTS: FlowCallout[] = [
+  { key: "turbo", partId: "turbocharger", title: "TURBOCHARGER" },
+  { key: "throttle", partId: "throttle-body", title: "THROTTLE BODY" },
+  { key: "intake", partId: "intake-manifold", title: "INTAKE MANIFOLD" },
+  { key: "cylinders", partId: "cylinder-1", title: "CYLINDERS" },
+  { key: "exhaust", partId: "exhaust-manifold", title: "EXHAUST MANIFOLD" },
+  { key: "wastegate", partId: "wastegate", title: "WASTE GATE" },
 ];
+
+const LABEL_WIDTH = 148;
+/** Matches the box's `minHeight` below, so a leader line always meets the true edge. */
+const LABEL_HEIGHT = 48;
+const ROW_MARGIN = 10;
+const LINE_GAP = 8;
+/** Slots per line before a row wraps into a second stacked line. Six callouts today
+ *  never come close to this — it exists so a future part doesn't silently overlap. */
+const MAX_PER_LINE = 4;
+/** Screen-space radius, in canvas pixels, that counts as "hovering the part itself". */
+const HOVER_PROXIMITY_PX = 20;
+
+type Row = "top" | "bottom";
+interface Slot {
+  x: number;
+  y: number;
+  row: Row;
+}
+
+function layoutRow(keys: string[], row: Row, width: number, height: number): [string, Slot][] {
+  return keys.map((key, i) => {
+    const line = Math.floor(i / MAX_PER_LINE);
+    const lineStart = line * MAX_PER_LINE;
+    const countInLine = Math.min(MAX_PER_LINE, keys.length - lineStart);
+    const posInLine = i - lineStart;
+    const x = (width * (posInLine + 1)) / (countInLine + 1);
+    const y =
+      row === "top"
+        ? ROW_MARGIN + line * (LABEL_HEIGHT + LINE_GAP)
+        : height - ROW_MARGIN - LABEL_HEIGHT - line * (LABEL_HEIGHT + LINE_GAP);
+    return [key, { x, y, row }];
+  });
+}
 
 /** Where each sensor-fault badge attaches, in world space. */
 const SENSOR_BADGE_POSITION: Record<string, [number, number, number]> = {
@@ -111,11 +137,111 @@ function fusionBadgeDetail(mount: string, frame: ReturnType<typeof useTelemetryS
 export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean }) {
   const [sensorMounts, setSensorMounts] = useState<string[]>([]);
   const [sensorDetail, setSensorDetail] = useState<Record<string, string | null>>({});
-  const [vitals, setVitals] = useState({ boost: 0, rpm: 0, egt: 0 });
 
-  // Poll the store at 4 Hz. These are DOM nodes with text in them; re-rendering them at
-  // frame rate would be both unreadable and the one genuinely expensive thing in the
-  // scene, since each `<Html>` is a positioned overlay element.
+  const { select } = usePartSelection();
+  const camera = useThree((s) => s.camera);
+  const size = useThree((s) => s.size);
+
+  // Explicit hover (mouse over the label box itself) and proximity hover (mouse near the
+  // part's live projected position) are tracked separately so neither clobbers the
+  // other; the label/line render at "hovered" if either says so.
+  const [boxHoverKey, setBoxHoverKey] = useState<string | null>(null);
+  const [proxHoverKey, setProxHoverKey] = useState<string | null>(null);
+  const proxHoverRef = useRef<string | null>(null);
+  const activeHoverKey = boxHoverKey ?? proxHoverKey;
+
+  const lineRefs = useRef<Record<string, SVGLineElement | null>>({});
+  const dotRefs = useRef<Record<string, SVGCircleElement | null>>({});
+  const anchorVec = useMemo(() => new THREE.Vector3(), []);
+
+  // R3F's `pointer` defaults to (0,0) NDC — canvas centre — until the user's mouse has
+  // actually moved over the canvas at least once. Without this guard, a part whose
+  // anchor happens to project near centre reads as "hovered" from the very first frame,
+  // before anyone has touched anything.
+  const gl = useThree((s) => s.gl);
+  const hasPointerMoved = useRef(false);
+  useEffect(() => {
+    const dom = gl.domElement;
+    const onMove = () => {
+      hasPointerMoved.current = true;
+    };
+    dom.addEventListener("pointermove", onMove);
+    return () => dom.removeEventListener("pointermove", onMove);
+  }, [gl]);
+
+  const slots = useMemo(() => {
+    const topKeys = FLOW_CALLOUTS.filter((_, i) => i % 2 === 0).map((c) => c.key);
+    const bottomKeys = FLOW_CALLOUTS.filter((_, i) => i % 2 === 1).map((c) => c.key);
+    return new Map<string, Slot>([
+      ...layoutRow(topKeys, "top", size.width, size.height),
+      ...layoutRow(bottomKeys, "bottom", size.width, size.height),
+    ]);
+  }, [size.width, size.height]);
+
+  // Reproject every leader line's endpoint each frame, and track whether the pointer is
+  // near enough to a part's live screen position to count as hovering it. Both write
+  // straight into refs/DOM rather than React state, matching every other per-frame
+  // binding in this scene — the exception is `setProxHoverKey`, which only fires on an
+  // actual change (same guarded pattern as `setSensorMounts` below).
+  useFrame(({ pointer }) => {
+    if (!showCallouts) return;
+    camera.updateMatrixWorld();
+
+    const pointerPx = (pointer.x * 0.5 + 0.5) * size.width;
+    const pointerPy = (1 - (pointer.y * 0.5 + 0.5)) * size.height;
+
+    let nearestKey: string | null = null;
+    let nearestDist = HOVER_PROXIMITY_PX;
+
+    for (const c of FLOW_CALLOUTS) {
+      const part = ENGINE_PARTS_BY_ID[c.partId];
+      const slot = slots.get(c.key);
+      if (!part || !slot) continue;
+
+      anchorVec.set(part.focus[0], part.focus[1], part.focus[2]);
+      anchorVec.project(camera);
+      let px = (anchorVec.x * 0.5 + 0.5) * size.width;
+      let py = (1 - (anchorVec.y * 0.5 + 0.5)) * size.height;
+      // Clamp on-screen so a part that has scrolled out of frame (fully zoomed into a
+      // neighbouring region) still gets a line pointing the right direction instead of
+      // one that shoots off into nowhere.
+      px = Math.min(Math.max(px, 4), size.width - 4);
+      py = Math.min(Math.max(py, 4), size.height - 4);
+
+      const connectorX = slot.x;
+      const connectorY = slot.row === "top" ? slot.y + LABEL_HEIGHT : slot.y;
+
+      const line = lineRefs.current[c.key];
+      if (line) {
+        line.setAttribute("x1", String(connectorX));
+        line.setAttribute("y1", String(connectorY));
+        line.setAttribute("x2", String(px));
+        line.setAttribute("y2", String(py));
+      }
+      const dot = dotRefs.current[c.key];
+      if (dot) {
+        dot.setAttribute("cx", String(px));
+        dot.setAttribute("cy", String(py));
+      }
+
+      const dist = Math.hypot(pointerPx - px, pointerPy - py);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearestKey = c.key;
+      }
+    }
+
+    const effectiveNearestKey = hasPointerMoved.current ? nearestKey : null;
+    if (proxHoverRef.current !== effectiveNearestKey) {
+      proxHoverRef.current = effectiveNearestKey;
+      setProxHoverKey(effectiveNearestKey);
+    }
+  });
+
+  // Poll the store at 4 Hz for sensor-fault badges. These are DOM nodes with text in
+  // them; re-rendering them at frame rate would be both unreadable and the one
+  // genuinely expensive thing in the scene, since each `<Html>` is a positioned overlay
+  // element.
   useEffect(() => {
     const id = setInterval(() => {
       const frame = useTelemetryStore.getState().latest;
@@ -135,71 +261,94 @@ export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean })
       setSensorDetail(
         Object.fromEntries(mounts.map((m) => [m, fusionBadgeDetail(m, frame)]))
       );
-
-      const egtMean =
-        frame.cylinders.reduce((s, c) => s + c.egt_c, 0) /
-        Math.max(1, frame.cylinders.length);
-      setVitals({
-        boost: frame.boost_pressure_kpa,
-        rpm: frame.rpm,
-        egt: egtMean,
-      });
     }, 250);
     return () => clearInterval(id);
   }, []);
 
   return (
     <group>
-      {showCallouts &&
-        CALLOUTS.map((c) => (
-          <Html
-            key={c.key}
-            position={c.position}
-            center
-            distanceFactor={9}
-            zIndexRange={[20, 0]}
-            style={{ pointerEvents: "none" }}
+      {showCallouts && (
+        <Html fullscreen zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
+          <svg
+            width={size.width}
+            height={size.height}
+            style={{ position: "absolute", top: 0, left: 0, overflow: "visible", pointerEvents: "none" }}
           >
-            <div
-              style={{
-                width: 168,
-                padding: "6px 8px",
-                border: "1px dashed rgba(63,208,224,0.55)",
-                borderRadius: 4,
-                background: "rgba(10,14,20,0.82)",
-                color: "#cfd8e3",
-                fontFamily: "var(--font-mono), monospace",
-                fontSize: 8,
-                lineHeight: 1.45,
-                textAlign: "left",
-                backdropFilter: "blur(2px)",
-              }}
-            >
+            {FLOW_CALLOUTS.map((c) => {
+              const hovered = activeHoverKey === c.key;
+              return (
+                <g key={c.key}>
+                  <line
+                    ref={(el) => {
+                      lineRefs.current[c.key] = el;
+                    }}
+                    stroke={hovered ? "#3fd0e0" : "rgba(63,208,224,0.5)"}
+                    strokeWidth={hovered ? 1.6 : 1}
+                    strokeDasharray="3,3"
+                  />
+                  <circle
+                    ref={(el) => {
+                      dotRefs.current[c.key] = el;
+                    }}
+                    r={hovered ? 3 : 2.2}
+                    fill={hovered ? "#3fd0e0" : "rgba(63,208,224,0.65)"}
+                  />
+                </g>
+              );
+            })}
+          </svg>
+
+          {FLOW_CALLOUTS.map((c) => {
+            const part = ENGINE_PARTS_BY_ID[c.partId];
+            const slot = slots.get(c.key);
+            if (!part || !slot) return null;
+            const hovered = activeHoverKey === c.key;
+            return (
               <div
+                key={c.key}
+                onMouseEnter={() => setBoxHoverKey(c.key)}
+                onMouseLeave={() => setBoxHoverKey((k) => (k === c.key ? null : k))}
+                onClick={() => select(c.partId)}
                 style={{
-                  color: "#3fd0e0",
-                  fontWeight: 700,
-                  letterSpacing: "0.08em",
-                  marginBottom: 2,
+                  position: "absolute",
+                  left: slot.x - LABEL_WIDTH / 2,
+                  top: slot.y,
+                  width: LABEL_WIDTH,
+                  minHeight: LABEL_HEIGHT,
+                  boxSizing: "border-box",
+                  padding: "6px 8px",
+                  border: hovered ? "1px dashed #3fd0e0" : "1px dashed rgba(63,208,224,0.55)",
+                  borderRadius: 4,
+                  background: "rgba(10,14,20,0.86)",
+                  color: "#cfd8e3",
+                  fontFamily: "var(--font-mono), monospace",
                   fontSize: 8,
+                  lineHeight: 1.4,
+                  textAlign: "left",
+                  backdropFilter: "blur(2px)",
+                  pointerEvents: "auto",
+                  cursor: "pointer",
+                  boxShadow: hovered ? "0 0 10px rgba(63,208,224,0.55)" : "none",
+                  transition: "border-color 120ms, box-shadow 120ms",
                 }}
               >
-                {c.title}
+                <div
+                  style={{
+                    color: "#3fd0e0",
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    marginBottom: 2,
+                    fontSize: 8,
+                  }}
+                >
+                  {c.title}
+                </div>
+                <div style={{ color: "#8d99a8" }}>{part.short_label}</div>
               </div>
-              <div style={{ color: "#8d99a8" }}>{c.body}</div>
-              {c.key === "turbo" && (
-                <div style={{ color: "#4FC8E8", marginTop: 3 }}>
-                  boost {vitals.boost.toFixed(0)} kPa
-                </div>
-              )}
-              {c.key === "cylinders" && (
-                <div style={{ color: "#f5a623", marginTop: 3 }}>
-                  mean EGT {vitals.egt.toFixed(0)} °C
-                </div>
-              )}
-            </div>
-          </Html>
-        ))}
+            );
+          })}
+        </Html>
+      )}
 
       {/*
         Sensor-fault badges.
