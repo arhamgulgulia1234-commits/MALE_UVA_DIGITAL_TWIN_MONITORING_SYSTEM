@@ -27,6 +27,7 @@ import { LifecycleOverviewPanel } from "@/components/lifecycle/LifecycleOverview
 import { HealthTrendAcrossMissions } from "@/components/lifecycle/HealthTrendAcrossMissions";
 import { FaultEventHistoryTable } from "@/components/lifecycle/FaultEventHistoryTable";
 import { LogMaintenanceActionForm } from "@/components/lifecycle/LogMaintenanceActionForm";
+import { EMBLEM_PATH } from "@/lib/branding";
 
 const EngineCutaway3D = dynamic(
   () =>
@@ -36,8 +37,14 @@ const EngineCutaway3D = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="glass-panel flex h-[340px] w-full items-center justify-center text-xs text-slate-500">
-        Loading engine model…
+      <div className="glass-panel relative flex h-[340px] w-full items-center justify-center overflow-hidden text-xs text-slate-500">
+        <img
+          src={EMBLEM_PATH}
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none absolute h-40 w-40 opacity-[0.06]"
+        />
+        <span className="relative">Loading engine model…</span>
       </div>
     ),
   }

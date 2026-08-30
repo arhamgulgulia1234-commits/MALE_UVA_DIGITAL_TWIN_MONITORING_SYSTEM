@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useTelemetryStore } from "@/lib/store";
 import { useFleetStore } from "@/lib/fleet/store";
 import { UAV_IDS } from "@/lib/fleet/types";
+import { EMBLEM_PATH, PRODUCT_NAME, TAGLINE } from "@/lib/branding";
 import type { ConnectionStatus } from "@/lib/websocket";
 import { formatClock } from "@/lib/format";
 import type { MissionPhase, Recommendation, RecoveryRecommendation } from "@/lib/types";
@@ -116,12 +117,17 @@ export function MissionHeader() {
     <header className="sticky top-0 z-30 border-b border-base-border bg-base-bg/90 backdrop-blur">
       <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-status-cyan/40 bg-status-cyan/10">
-            <span className="font-display text-sm font-bold text-status-cyan">DT</span>
-          </div>
+          <img
+            src={EMBLEM_PATH}
+            alt={`${PRODUCT_NAME} emblem`}
+            className="h-9 w-9 shrink-0"
+          />
           <div>
-            <h1 className="font-display text-base font-bold tracking-wide text-slate-100 sm:text-lg">
-              SIH26054 · Aero Engine Digital Twin
+            <h1 className="flex items-baseline gap-2 font-display text-base font-bold tracking-wide text-slate-100 sm:text-lg">
+              {PRODUCT_NAME}
+              <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-brand-gold sm:text-[11px]">
+                {TAGLINE}
+              </span>
             </h1>
             <p className="text-[11px] text-slate-500">MALE UAV Piston Engine PHM — Mock Telemetry</p>
           </div>
