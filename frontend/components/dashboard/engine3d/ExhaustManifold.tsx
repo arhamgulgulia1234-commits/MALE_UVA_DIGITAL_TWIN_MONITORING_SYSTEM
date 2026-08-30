@@ -4,11 +4,14 @@ import { useCallback, useMemo } from "react";
 import * as THREE from "three";
 import { useTelemetryStore } from "@/lib/store";
 import { FlowArrows, FlowTube } from "./FlowArrows";
+import { usePartInteraction } from "./partSelection";
 import {
   COLORS,
   CYLINDER_LAYOUT,
   LAYOUT,
   fuelToExhaustFlow,
+  partEmphasis,
+  partMaterial,
 } from "./engine3dUtils";
 
 /**
@@ -58,10 +61,16 @@ export function ExhaustManifold({ xray, emphasis }: { xray: boolean; emphasis: n
     return fuelToExhaustFlow(frame?.fuel_flow_lph ?? 8);
   }, []);
 
-  const tubeOpacity = xray ? 0.4 : 0.22;
+  const { visual, handlers } = usePartInteraction("exhaust-manifold");
+  // The exhaust path is nothing but flow tubes, so its "selected" state is carried by the
+  // tubes brightening and the arrows keeping full emphasis while everything else ghosts —
+  // an outline on a 48-segment tube would read as noise rather than as a highlight.
+  const tubeOpacity =
+    visual === "selected" ? 0.55 : partMaterial(visual, xray, 0.4, 0.22).opacity;
+  const flowEmphasis = partEmphasis(visual, emphasis);
 
   return (
-    <group>
+    <group {...handlers}>
       {headers.map((curve, i) => (
         <group key={i}>
           <FlowTube
@@ -76,7 +85,7 @@ export function ExhaustManifold({ xray, emphasis }: { xray: boolean; emphasis: n
             count={6}
             size={0.04}
             sample={sample}
-            emphasis={emphasis}
+            emphasis={flowEmphasis}
           />
         </group>
       ))}
@@ -92,7 +101,7 @@ export function ExhaustManifold({ xray, emphasis }: { xray: boolean; emphasis: n
         color={COLORS.exhaust}
         count={24}
         sample={sample}
-        emphasis={emphasis}
+        emphasis={flowEmphasis}
       />
     </group>
   );

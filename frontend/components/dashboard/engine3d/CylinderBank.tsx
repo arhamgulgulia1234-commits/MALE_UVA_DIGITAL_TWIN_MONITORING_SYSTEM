@@ -4,6 +4,7 @@ import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useTelemetryStore } from "@/lib/store";
+import { PartOutline, usePartInteraction } from "./partSelection";
 import {
   CYLINDER_LAYOUT,
   COLORS,
@@ -12,6 +13,8 @@ import {
   egtToColor,
   egtToEmissiveIntensity,
   firingPulse,
+  partMaterial,
+  refreshMaterial,
   readFaults,
   vibrationOutliers,
 } from "./engine3dUtils";
@@ -70,6 +73,10 @@ function Cylinder({
   const mountScratch = useMemo(() => new THREE.Color(), []);
 
   const length = LAYOUT.cylinderOuter - LAYOUT.cylinderInner;
+  // Selection is a prop-level concern: it changes `transparent`/`opacity` and adds an
+  // outline. Nothing below in `useFrame` is aware of it, so a dimmed cylinder keeps
+  // glowing with its own live EGT colour.
+  const { visual, handlers } = usePartInteraction(`cylinder-${index + 1}`);
   const finGeometry = useMemo(
     () => new THREE.CylinderGeometry(LAYOUT.finRadius, LAYOUT.finRadius, 0.035, 20),
     []
@@ -136,10 +143,14 @@ function Cylinder({
     }
   });
 
-  const opacity = xray ? 0.3 : 1;
+  const mat = partMaterial(visual, xray, 0.3);
 
   return (
-    <group position={[x, 0.05, bank * LAYOUT.cylinderInner]} rotation={[bank * Math.PI / 2, 0, 0]}>
+    <group
+      position={[x, 0.05, bank * LAYOUT.cylinderInner]}
+      rotation={[bank * Math.PI / 2, 0, 0]}
+      {...handlers}
+    >
       {/* mount flange at the crankcase joint */}
       <mesh position={[0, 0.05, 0]}>
         <cylinderGeometry args={[0.31, 0.31, 0.1, 20]} />
@@ -148,8 +159,9 @@ function Cylinder({
           color={COLORS.darkMetal}
           metalness={0.6}
           roughness={0.5}
-          transparent={xray}
-          opacity={opacity}
+          onUpdate={refreshMaterial}
+          transparent={mat.transparent}
+          opacity={mat.opacity}
         />
       </mesh>
 
@@ -161,8 +173,9 @@ function Cylinder({
           color={COLORS.casting}
           metalness={0.45}
           roughness={0.55}
-          transparent={xray}
-          opacity={opacity}
+          onUpdate={refreshMaterial}
+          transparent={mat.transparent}
+          opacity={mat.opacity}
         />
       </mesh>
 
@@ -176,9 +189,13 @@ function Cylinder({
             color={COLORS.casting}
             metalness={0.35}
             roughness={0.62}
-            transparent={xray}
-            opacity={opacity}
+            onUpdate={refreshMaterial}
+            transparent={mat.transparent}
+            opacity={mat.opacity}
           />
+          {/* The fins are the widest part of the cylinder, so they are what carries the
+              selection rim — an outline on the barrel would be swallowed by them. */}
+          <PartOutline visual={visual} thickness={1.5} />
         </mesh>
       ))}
 
@@ -190,9 +207,11 @@ function Cylinder({
           color={COLORS.casting}
           metalness={0.5}
           roughness={0.5}
-          transparent={xray}
-          opacity={opacity}
+          onUpdate={refreshMaterial}
+          transparent={mat.transparent}
+          opacity={mat.opacity}
         />
+        <PartOutline visual={visual} />
       </mesh>
 
       {/* combustion flash — sits inside the head, brightens on each firing event */}
@@ -211,7 +230,14 @@ function Cylinder({
       {/* spark plug boss + ignition lead anchor */}
       <mesh position={[0.22, length - 0.02, 0.16]} rotation={[0, 0, Math.PI / 5]}>
         <cylinderGeometry args={[0.045, 0.045, 0.16, 10]} />
-        <meshStandardMaterial color={COLORS.brass} metalness={0.8} roughness={0.35} />
+        <meshStandardMaterial
+          color={COLORS.brass}
+          metalness={0.8}
+          roughness={0.35}
+          onUpdate={refreshMaterial}
+          transparent={mat.transparent}
+          opacity={mat.opacity}
+        />
       </mesh>
     </group>
   );

@@ -4,11 +4,15 @@ import { useCallback, useMemo } from "react";
 import * as THREE from "three";
 import { useTelemetryStore } from "@/lib/store";
 import { FlowArrows, FlowTube } from "./FlowArrows";
+import { PartOutline, usePartInteraction } from "./partSelection";
 import {
   COLORS,
   CYLINDER_LAYOUT,
   LAYOUT,
   boostToFlow,
+  partEmphasis,
+  partMaterial,
+  refreshMaterial,
 } from "./engine3dUtils";
 
 /**
@@ -59,17 +63,27 @@ export function IntakeManifold({ xray, emphasis }: { xray: boolean; emphasis: nu
     return boostToFlow(frame?.boost_pressure_kpa ?? 100);
   }, []);
 
-  const tubeOpacity = xray ? 0.4 : 0.2;
+  // The throttle body is its own registry entry even though it sits on the intake trunk:
+  // it is the pilot's direct lever on power, so it is worth being able to point at.
+  const intakeSel = usePartInteraction("intake-manifold");
+  const throttleSel = usePartInteraction("throttle-body");
+
+  const tubeOpacity = partMaterial(intakeSel.visual, xray, 0.4, 0.2).opacity;
+  const intakeEmphasis = partEmphasis(intakeSel.visual, emphasis);
+  const plenumMat = partMaterial(intakeSel.visual, xray, 0.4, 0.75);
+  const housingMat = partMaterial(intakeSel.visual, xray, 0.35);
+  const throttleMat = partMaterial(throttleSel.visual, xray, 0.35);
 
   return (
-    <group>
+    <>
+    <group {...intakeSel.handlers}>
       <FlowTube curve={trunk} color={COLORS.intake} radius={0.07} opacity={tubeOpacity} />
       <FlowArrows
         curve={trunk}
         color={COLORS.intake}
         count={26}
         sample={sample}
-        emphasis={emphasis}
+        emphasis={intakeEmphasis}
       />
 
       {runners.map((curve, i) => (
@@ -86,27 +100,10 @@ export function IntakeManifold({ xray, emphasis }: { xray: boolean; emphasis: nu
             count={7}
             size={0.042}
             sample={sample}
-            emphasis={emphasis}
+            emphasis={intakeEmphasis}
           />
         </group>
       ))}
-
-      {/* throttle body housing */}
-      <mesh position={[throttleX, throttleY, 0]}>
-        <cylinderGeometry args={[0.15, 0.15, 0.3, 16]} />
-        <meshStandardMaterial
-          color={COLORS.darkMetal}
-          metalness={0.6}
-          roughness={0.45}
-          transparent={xray}
-          opacity={xray ? 0.35 : 1}
-        />
-      </mesh>
-      {/* butterfly plate, visible through the throttle body */}
-      <mesh position={[throttleX, throttleY, 0]} rotation={[0.5, 0, 0]}>
-        <cylinderGeometry args={[0.13, 0.13, 0.015, 16]} />
-        <meshStandardMaterial color={COLORS.brass} metalness={0.85} roughness={0.3} />
-      </mesh>
 
       {/* carburettor / injection housings at bottom centre, as on the boxer render */}
       {[-0.34, 0.34].map((z) => (
@@ -116,8 +113,9 @@ export function IntakeManifold({ xray, emphasis }: { xray: boolean; emphasis: nu
             color="#2f353f"
             metalness={0.5}
             roughness={0.55}
-            transparent={xray}
-            opacity={xray ? 0.35 : 1}
+            onUpdate={refreshMaterial}
+            transparent={housingMat.transparent}
+            opacity={housingMat.opacity}
           />
         </mesh>
       ))}
@@ -130,9 +128,40 @@ export function IntakeManifold({ xray, emphasis }: { xray: boolean; emphasis: nu
           metalness={0.4}
           roughness={0.5}
           transparent
-          opacity={xray ? 0.4 : 0.75}
+          opacity={plenumMat.opacity}
+        />
+        <PartOutline visual={intakeSel.visual} />
+      </mesh>
+    </group>
+
+    {/* --- throttle body ------------------------------------------------ */}
+    <group {...throttleSel.handlers}>
+      {/* throttle body housing */}
+      <mesh position={[throttleX, throttleY, 0]}>
+        <cylinderGeometry args={[0.15, 0.15, 0.3, 16]} />
+        <meshStandardMaterial
+          color={COLORS.darkMetal}
+          metalness={0.6}
+          roughness={0.45}
+          onUpdate={refreshMaterial}
+          transparent={throttleMat.transparent}
+          opacity={throttleMat.opacity}
+        />
+        <PartOutline visual={throttleSel.visual} />
+      </mesh>
+      {/* butterfly plate, visible through the throttle body */}
+      <mesh position={[throttleX, throttleY, 0]} rotation={[0.5, 0, 0]}>
+        <cylinderGeometry args={[0.13, 0.13, 0.015, 16]} />
+        <meshStandardMaterial
+          color={COLORS.brass}
+          metalness={0.85}
+          roughness={0.3}
+          onUpdate={refreshMaterial}
+          transparent={throttleMat.transparent}
+          opacity={throttleMat.opacity}
         />
       </mesh>
     </group>
+    </>
   );
 }

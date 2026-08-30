@@ -1,11 +1,12 @@
 "use client";
 
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import clsx from "clsx";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { GlassCard } from "@/components/ui/GlassCard";
+import { getEnginePart, type EnginePart } from "@/lib/enginePartsRegistry";
 import { useTelemetryStore } from "@/lib/store";
 import { CylinderBank } from "./CylinderBank";
 import { Crankshaft } from "./Crankshaft";
@@ -13,10 +14,21 @@ import { EngineLabelsOverlay } from "./EngineLabelsOverlay";
 import { ExhaustManifold } from "./ExhaustManifold";
 import { FaultOverlays } from "./FaultOverlays";
 import { IntakeManifold } from "./IntakeManifold";
+import { ModuleMap } from "./ModuleMapToggle";
+import { PartDetailPanel } from "./PartDetailPanel";
+import { PartSelectionProvider, usePartSelection } from "./partSelection";
 import { Turbocharger } from "./Turbocharger";
-import { aggregateVibration, reliabilityTint } from "./engine3dUtils";
+import {
+  DIM_OPACITY,
+  aggregateVibration,
+  refreshMaterial,
+  reliabilityTint,
+} from "./engine3dUtils";
 
-type ViewMode = "full" | "flow";
+type ViewMode = "full" | "flow" | "modules";
+
+/** Camera distance the scene rests at with nothing selected — the initial framing. */
+const HOME_DISTANCE = Math.hypot(3.9, 2.5, 4.6);
 
 /**
  * Telemetry-reactive 3D cutaway of the turbocharged boxer aero engine.
@@ -35,15 +47,38 @@ type ViewMode = "full" | "flow";
  */
 export function EngineCutaway3D() {
   const [mode, setMode] = useState<ViewMode>("full");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const xray = mode === "flow";
+
+  // Clicking the already-selected part clears it, so the same gesture that opened the
+  // inspector closes it.
+  const select = useCallback((id: string) => {
+    setSelectedId((prev) => (prev === id ? null : id));
+  }, []);
+  const clear = useCallback(() => setSelectedId(null), []);
+
+  const selection = useMemo(() => ({ selectedId, select }), [selectedId, select]);
+  const selectedPart = getEnginePart(selectedId);
+
+  const fromModuleMap = useCallback(
+    (id: string) => {
+      setMode("full");
+      setSelectedId(id);
+    },
+    []
+  );
 
   return (
     <GlassCard
       title="Engine Cutaway"
       subtitle={
-        xray
-          ? "Flow diagram · intake (cyan) / exhaust (teal)"
-          : "Turbocharged opposed-four · live telemetry"
+        mode === "modules"
+          ? "Module map · physical part → backend module"
+          : selectedPart
+            ? `Inspecting · ${selectedPart.displayName}`
+            : xray
+              ? "Flow diagram · intake (cyan) / exhaust (teal)"
+              : "Turbocharged opposed-four · live telemetry"
       }
       glow="cyan"
       className="h-full"
@@ -54,25 +89,120 @@ export function EngineCutaway3D() {
           camera={{ position: [3.9, 2.5, 4.6], fov: 42 }}
           dpr={[1, 1.75]}
           gl={{ antialias: true, powerPreference: "high-performance" }}
+          onPointerMissed={clear}
         >
           <color attach="background" args={["#0a0e14"]} />
           <fog attach="fog" args={["#0a0e14", 8, 16]} />
-          <Scene xray={xray} />
+          <PartSelectionProvider value={selection}>
+            <Scene xray={xray} />
+          </PartSelectionProvider>
+          <CameraRig part={selectedPart} panelOffset={selectedPart !== null} />
           <OrbitControls
+            makeDefault
             enablePan={false}
             minDistance={3.4}
             maxDistance={11}
-            autoRotate={!xray}
+            autoRotate={!xray && !selectedId}
             autoRotateSpeed={0.45}
             target={[0, 0, 0]}
           />
         </Canvas>
 
+        {selectedPart && mode !== "modules" && (
+          <PartDetailPanel part={selectedPart} onClose={clear} />
+        )}
+
+        {mode === "modules" && (
+          <ModuleMap selectedId={selectedId} onSelect={fromModuleMap} />
+        )}
+
         <ViewModeToggle mode={mode} onChange={setMode} />
+        {selectedPart && mode !== "modules" && (
+          <button
+            onClick={clear}
+            className="absolute bottom-3 right-3 z-20 rounded-lg border border-base-border bg-base-bg/85 px-2.5 py-1 font-mono text-[10px] text-slate-400 backdrop-blur transition-colors hover:border-status-cyan/40 hover:text-status-cyan"
+          >
+            Reset View
+          </button>
+        )}
+        {!selectedPart && mode === "full" && (
+          <div className="pointer-events-none absolute bottom-3 right-3 font-mono text-[9px] text-slate-600">
+            click a part to inspect
+          </div>
+        )}
         <Legend xray={xray} />
       </div>
     </GlassCard>
   );
+}
+
+/**
+ * Eases the orbit target and camera distance toward the selected part, then gets out of
+ * the way.
+ *
+ * The rig only runs while a transition is in flight — once it has settled it disables
+ * itself, so orbiting and zooming stay entirely the user's after the move. A rig that ran
+ * every frame would silently undo every scroll-wheel zoom.
+ *
+ * The target is nudged sideways by roughly the width of the detail panel so the part
+ * being inspected lands right of centre, clear of the panel, instead of directly behind
+ * it. That is done in camera space, which is why it is recomputed as the camera moves.
+ */
+function CameraRig({ part, panelOffset }: { part: EnginePart | null; panelOffset: boolean }) {
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as
+    | (THREE.EventDispatcher & { target: THREE.Vector3; update: () => void })
+    | null;
+
+  const active = useRef(false);
+  const scratch = useMemo(
+    () => ({
+      goal: new THREE.Vector3(),
+      offset: new THREE.Vector3(),
+      right: new THREE.Vector3(),
+    }),
+    []
+  );
+
+  useEffect(() => {
+    active.current = true;
+  }, [part]);
+
+  useFrame((_, delta) => {
+    if (!active.current || !controls?.target) return;
+
+    const goalDistance = part ? part.focusDistance : HOME_DISTANCE;
+    scratch.goal.set(0, 0, 0);
+    if (part) {
+      scratch.goal.set(part.focus[0], part.focus[1], part.focus[2]);
+      if (panelOffset) {
+        scratch.right.setFromMatrixColumn(camera.matrixWorld, 0).setY(0).normalize();
+        scratch.goal.addScaledVector(scratch.right, -goalDistance * 0.17);
+      }
+    }
+
+    // ~0.5s ease, frame-rate independent.
+    const k = 1 - Math.pow(0.01, Math.min(delta, 0.1) / 0.5);
+
+    scratch.offset.copy(camera.position).sub(controls.target);
+    const distance = scratch.offset.length();
+    controls.target.lerp(scratch.goal, k);
+    if (distance > 1e-4) {
+      const next = distance + (goalDistance - distance) * k;
+      scratch.offset.multiplyScalar(next / distance);
+      camera.position.copy(controls.target).add(scratch.offset);
+    }
+    controls.update();
+
+    if (
+      controls.target.distanceTo(scratch.goal) < 0.01 &&
+      Math.abs(distance - goalDistance) < 0.02
+    ) {
+      active.current = false;
+    }
+  });
+
+  return null;
 }
 
 function Scene({ xray }: { xray: boolean }) {
@@ -161,8 +291,15 @@ function RimLight() {
   );
 }
 
-/** Orange ignition leads looping along each bank, as on the reference render. */
+/**
+ * Orange ignition leads looping along each bank, as on the reference render.
+ *
+ * Not a registry part — you cannot click a lead — but it still ghosts along with
+ * everything else when a part is selected, because leaving it at full brightness would
+ * leave two vivid orange stripes across an otherwise de-emphasised engine.
+ */
 function IgnitionHarness({ xray }: { xray: boolean }) {
+  const { selectedId } = usePartSelection();
   const geometries = useMemo(() => {
     const make = (bank: 1 | -1) =>
       new THREE.TubeGeometry(
@@ -190,8 +327,9 @@ function IgnitionHarness({ xray }: { xray: boolean }) {
             color="#E8792B"
             roughness={0.65}
             metalness={0.1}
-            transparent={xray}
-            opacity={xray ? 0.35 : 1}
+            onUpdate={refreshMaterial}
+            transparent={xray || selectedId !== null}
+            opacity={selectedId !== null ? DIM_OPACITY : xray ? 0.35 : 1}
           />
         </mesh>
       ))}
@@ -207,18 +345,19 @@ function ViewModeToggle({
   onChange: (m: ViewMode) => void;
 }) {
   return (
-    <div className="absolute right-3 top-3 flex gap-1 rounded-lg border border-base-border bg-base-bg/85 p-1 backdrop-blur">
+    <div className="absolute right-3 top-3 z-30 flex gap-1 rounded-lg border border-base-border bg-base-bg/85 p-1 backdrop-blur">
       {(
         [
           ["full", "Full Engine"],
           ["flow", "Flow Diagram"],
+          ["modules", "Module Map"],
         ] as const
       ).map(([value, label]) => (
         <button
           key={value}
           onClick={() => onChange(value)}
           className={clsx(
-            "rounded-md px-2.5 py-1 font-mono text-[10px] transition-colors",
+            "rounded-md px-2 py-1 font-mono text-[10px] transition-colors",
             mode === value
               ? "bg-status-cyan/15 text-status-cyan"
               : "text-slate-500 hover:text-slate-300"
