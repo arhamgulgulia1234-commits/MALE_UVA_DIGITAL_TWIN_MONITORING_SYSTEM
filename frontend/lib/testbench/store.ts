@@ -7,6 +7,7 @@
  * distinction this mode exists to keep sharp: nothing in here is live.
  */
 import { create } from "zustand";
+import { useFleetStore } from "../fleet/store";
 import {
   TestBenchError,
   applyPreset,
@@ -323,3 +324,12 @@ export const useTestBenchStore = create<TestBenchStore>((set, get) => ({
     });
   },
 }));
+
+// Phase 6: mission status (and the live map marker's engine) are per-UAV — refresh
+// them when the fleet selector points at a different one, so the Test Bench's "mission
+// active" banner and PerformanceMapViewer's marker never keep showing a previous UAV's
+// state under a newly selected one.
+useFleetStore.subscribe((state, prevState) => {
+  if (state.selectedUavId === prevState.selectedUavId) return;
+  void useTestBenchStore.getState().refreshMissionStatus();
+});

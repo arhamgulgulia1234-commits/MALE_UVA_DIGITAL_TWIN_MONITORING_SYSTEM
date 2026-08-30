@@ -13,6 +13,11 @@ import { usePathname } from "next/navigation";
 const MODES = [
   { href: "/", label: "Live Dashboard", hint: "Streaming telemetry" },
   { href: "/test-bench", label: "Test Bench", hint: "Offline what-if" },
+  // Phase 6: the one nav tab that spans the whole fleet rather than one UAV — every
+  // other tab here is scoped to whichever UAV MissionHeader's selector currently has
+  // picked, which is exactly why this one is not folded into the Live Dashboard the
+  // way Lifecycle and the performance map were.
+  { href: "/fleet", label: "Fleet", hint: "Squadron-wide health" },
 ] as const;
 
 export function ModeNav({ className }: { className?: string }) {

@@ -144,6 +144,30 @@ comparative — *this setting is gentler than that one* — not absolute.
   "our model is biased" — a fleet-wide common-mode residual is a modelling error, not
   fifty simultaneous failures.
 
+**Scaling the three-UAV fleet pattern to a real squadron.** The current implementation (see
+docs/architecture.md's "Fleet-Level Health Monitoring" section) proves the pattern — one
+`SimulationLoop`/`ReplayEngine` pair and one lifecycle ledger per airframe, a `uav_id` on
+every per-engine request, a ranked fleet-wide view — at a fixed roster of three hardcoded
+ids. Getting from that to an operational squadron needs:
+- **A real roster, not a constant.** `app/core/uav_ids.py::UAV_IDS` becomes a database
+  table (airframe id, tail number, commissioning date, retirement status) with admin
+  endpoints to add/retire an airframe, rather than a code edit and a restart.
+- **One process per airframe, not one process for all of them.** `FleetRegistry` ticking
+  N `SimulationLoop`s in a single asyncio loop is fine for three simulated engines sharing
+  one CPU; a real squadron's edge deployment is Stage 2's "one instance per aircraft"
+  model — each airframe already runs its own instance in the field, so the fleet view's job
+  shifts from *simulating* N engines to *aggregating* N independent deployments' telemetry,
+  which is a different architecture (a fleet-level aggregation service consuming each
+  airframe's uplink, not a bigger version of `FleetRegistry`).
+- **Per-tenant auth**, not one shared bearer token — Stage 3/the security section below's
+  token needs to be scoped per airframe (or per squadron/operator), so one compromised
+  ground link cannot inject faults or read diagnostics for an aircraft it has no business
+  touching.
+- **The ranking heuristic in `app/api/fleet.py::_urgency_key` earns real operational
+  weighting** (mission criticality, time-to-next-sortie, spares availability) instead of
+  the demo's fixed GO/CAUTION/NO-GO-then-health ordering, once there is a real maintenance
+  scheduling system for it to feed.
+
 ---
 
 ## Security: from demo token to defence-grade

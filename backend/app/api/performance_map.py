@@ -27,6 +27,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from app.core.compute_budget import heavy_compute_slot
 from app.core.engine_params import PARAMS
+from app.core.uav_ids import DEFAULT_UAV_ID
 from app.physics.performance_map import (
     DEFAULT_LOAD_STEPS,
     DEFAULT_METRIC,
@@ -132,7 +133,9 @@ async def list_metrics() -> dict:
 
 
 @router.get("/live-point")
-async def live_operating_point(request: Request) -> dict:
+async def live_operating_point(
+    request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
     """Where the live engine is on the map right now — RPM, throttle and altitude.
 
     Deliberately a poll rather than a subscription. The Test Bench page opens no WebSocket
@@ -145,7 +148,8 @@ async def live_operating_point(request: Request) -> dict:
     been produced yet: an absent marker is a normal state for this panel, not an error the
     operator needs to see.
     """
-    sim = getattr(request.app.state, "sim", None)
+    fleet = getattr(request.app.state, "fleet", None)
+    sim = fleet.entries[uav_id].sim if fleet is not None and uav_id in fleet.entries else None
     unavailable = {
         "available": False,
         "reason": "no live physics frame yet",

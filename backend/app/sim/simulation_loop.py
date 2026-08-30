@@ -613,38 +613,49 @@ class SimulationLoop:
 
 
 async def run_simulation(app) -> None:
-    """Background task: tick the simulation, persist frames if a mission is recording,
-    and broadcast at the configured rate."""
-    from app.api import ws_telemetry
-    from app.db.repository import repository
-    from app.sim.replay_engine import replay_engine
+    """Background task: tick every registered UAV's simulation, persist frames for
+    whichever ones are recording a mission, and broadcast each to its own subscribers.
 
-    sim: SimulationLoop = app.state.sim
+    Phase 6 generalises this from one implicit engine to the fleet: `app.state.fleet`
+    holds one independent `SimulationLoop` (+ `ReplayEngine`) per UAV, and this loop
+    ticks all of them every 100 ms rather than a single `app.state.sim`. Nothing about
+    how any *one* `SimulationLoop` ticks changes — the physics, PHM chain and fusion
+    layer are exactly as they were for a single engine; this function is just N of them,
+    each independently live/idle/replaying, persisted and broadcast on its own."""
+    from app.api import ws_telemetry
+    from app.core.fleet_registry import FleetRegistry
+    from app.db.repository import repository
+
+    fleet: FleetRegistry = app.state.fleet
     last = time.perf_counter()
     while True:
         await asyncio.sleep(settings.tick_seconds)
         now = time.perf_counter()
         wall_dt = now - last
         last = now
-        try:
-            frame = sim.tick(wall_dt)
-        except Exception:
-            logger.exception("Simulation tick failed")
-            continue
 
-        payload = frame.model_dump()
-
-        # Persistence happens only inside an explicit mission session. Ad-hoc testing
-        # still streams live; it just is not recorded.
-        if sim.active_mission_id is not None:
+        for entry in fleet:
             try:
-                repository.save_frame(sim.active_mission_id, payload)
+                frame = entry.sim.tick(wall_dt)
             except Exception:
-                logger.exception("Failed to persist telemetry frame")
+                logger.exception("Simulation tick failed for %s", entry.uav_id)
+                continue
 
-        # The physics keeps running during a replay (so returning to live is instant),
-        # but the replay engine owns the socket while it is active.
-        if replay_engine.active:
-            continue
+            payload = frame.model_dump()
 
-        await ws_telemetry.manager.broadcast_json(payload)
+            # Persistence happens only inside an explicit mission session. Ad-hoc
+            # testing still streams live; it just is not recorded.
+            if entry.sim.active_mission_id is not None:
+                try:
+                    repository.save_frame(entry.sim.active_mission_id, payload)
+                except Exception:
+                    logger.exception(
+                        "Failed to persist telemetry frame for %s", entry.uav_id
+                    )
+
+            # The physics keeps running during a replay (so returning to live is
+            # instant), but that UAV's own replay engine owns its socket while active.
+            if entry.replay_engine.active:
+                continue
+
+            await ws_telemetry.manager.broadcast_to_uav(entry.uav_id, payload)

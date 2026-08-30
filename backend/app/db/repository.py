@@ -12,6 +12,7 @@ from typing import Any, Iterable
 
 from sqlalchemy import select
 
+from app.core.uav_ids import DEFAULT_UAV_ID
 from app.db.models import FaultEvent, Mission, ScenarioRun, TelemetryFrameRow
 from app.db.session import get_session
 
@@ -27,12 +28,19 @@ class MissionRepository:
 
     # ---- missions ---------------------------------------------------------
 
-    def start_mission(self, profile_name: str, notes: str | None = None) -> int:
+    def start_mission(
+        self,
+        profile_name: str,
+        notes: str | None = None,
+        uav_id: str = DEFAULT_UAV_ID,
+    ) -> int:
         with get_session() as session:
-            mission = Mission(mission_profile_name=profile_name, notes=notes)
+            mission = Mission(mission_profile_name=profile_name, notes=notes, uav_id=uav_id)
             session.add(mission)
             session.commit()
-            logger.info("Started mission %s (profile=%s)", mission.id, profile_name)
+            logger.info(
+                "Started mission %s (uav=%s, profile=%s)", mission.id, uav_id, profile_name
+            )
             return mission.id
 
     def end_mission(self, mission_id: int, report: dict | None = None) -> None:
@@ -49,11 +57,12 @@ class MissionRepository:
             session.commit()
             logger.info("Ended mission %s", mission_id)
 
-    def list_missions(self) -> list[dict[str, Any]]:
+    def list_missions(self, uav_id: str | None = None) -> list[dict[str, Any]]:
         with get_session() as session:
-            missions = session.scalars(
-                select(Mission).order_by(Mission.id.desc())
-            ).all()
+            stmt = select(Mission).order_by(Mission.id.desc())
+            if uav_id is not None:
+                stmt = stmt.where(Mission.uav_id == uav_id)
+            missions = session.scalars(stmt).all()
             out: list[dict[str, Any]] = []
             for m in missions:
                 frame_count = session.scalar(
@@ -66,6 +75,7 @@ class MissionRepository:
                 out.append(
                     {
                         "id": m.id,
+                        "uav_id": m.uav_id,
                         "started_at": m.started_at.isoformat() if m.started_at else None,
                         "ended_at": m.ended_at.isoformat() if m.ended_at else None,
                         "mission_profile_name": m.mission_profile_name,
@@ -98,6 +108,7 @@ class MissionRepository:
                 return None
             return {
                 "id": m.id,
+                "uav_id": m.uav_id,
                 "started_at": m.started_at.isoformat() if m.started_at else None,
                 "ended_at": m.ended_at.isoformat() if m.ended_at else None,
                 "mission_profile_name": m.mission_profile_name,

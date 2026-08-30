@@ -11,6 +11,7 @@
  * without the two components needing any direct relationship.
  */
 import { create } from "zustand";
+import { useFleetStore } from "../fleet/store";
 import {
   LifecycleError,
   fetchLifecycleSummary,
@@ -74,3 +75,11 @@ export const useLifecycleStore = create<LifecycleStore>((set, get) => ({
     }
   },
 }));
+
+// Phase 6: re-fetch this UAV's ledger whenever the fleet selector points somewhere
+// else, so the Lifecycle view never keeps showing a previous UAV's summary under a
+// newly selected one's header.
+useFleetStore.subscribe((state, prevState) => {
+  if (state.selectedUavId === prevState.selectedUavId) return;
+  void useLifecycleStore.getState().loadSummary();
+});

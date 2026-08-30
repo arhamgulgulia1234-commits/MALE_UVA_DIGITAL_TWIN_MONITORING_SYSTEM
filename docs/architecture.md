@@ -487,6 +487,110 @@ even while one of its two sources lies, so waiting for that channel to become th
 the case this layer exists to catch. Every channel Part B did not build a fusion pair for
 (EGT, fuel, battery, ...) still falls through to that original heuristic, unchanged.
 
+## Fleet-Level Health Monitoring (Phase 6)
+
+Every phase through 5 simulates one engine. Phase 6 generalises the backend to N (three)
+independently simulated UAVs — "UAV-01", "UAV-02", "UAV-03" — without changing what any
+single UAV's simulation *is*: `SimulationLoop` itself gained zero new lines for this phase.
+What changed is everything one layer up, that used to assume there was exactly one of it.
+
+**`FleetEntry` and `FleetRegistry` (`app/core/fleet_registry.py`).** A `FleetEntry` is a
+`SimulationLoop` plus its own `ReplayEngine` — the two pieces of *per-engine* mutable state
+control.py used to reach for as `app.state.sim` and the module-level `replay_engine`
+singleton. `ReplayEngine` needed no code change at all to become per-UAV: it already took
+its `broadcast` callback as a parameter to `start()` rather than importing the telemetry
+manager directly, so three independent instances just work. `FleetRegistry` holds one
+`FleetEntry` per uav_id in a plain dict; `app.state.fleet` is the source of truth built
+once at startup by `build_default_fleet()`, and `app.state.sim` is kept as an alias to
+`fleet.default.sim` purely so code that has not been made uav_id-aware (chiefly the Phase 1
+mock generator, which never will be — see `app/main.py::_run_mock`) keeps working exactly
+as it did.
+
+**Continuity with everything recorded before this phase.** UAV-01 is not a fresh engine —
+it is deliberately the *same* engine every earlier phase's Lifecycle feature was already
+tracking under `engine_id="primary"`. `fleet_registry.lifecycle_engine_id(uav_id)` maps
+UAV-01 back onto `DEFAULT_ENGINE_ID` ("primary") and every other UAV onto its own id, so a
+database that already had missions and accumulated wear before this phase existed sees
+UAV-01 pick up exactly where "the engine" left off, rather than starting over under a new
+key. The `missions` table needed an actual schema change to carry this — the first one in
+the project's history to alter an already-shipped table rather than add a new one (see
+"the migration" below) — and its new `uav_id` column defaults to "UAV-01" for every
+pre-existing row, which is the other half of the same continuity guarantee.
+
+**Pre-seeded starting wear, once.** Task 1's requirement — a realistic, differentiated
+fleet the moment the backend starts, without requiring a mission run on each UAV first — is
+`fleet_registry._SEED_WEAR_STATES` plus `seed_fleet_wear()`. UAV-02 gets moderate wear
+spread across a few subsystems; UAV-03 gets `bearing_wear` pushed close to a maintenance
+threshold, chosen because it shows up across several channels at once (vibration, oil
+pressure, RPM stability) and so reliably produces the worst health score of the three. The
+seed only fires when a UAV's `engine_lifecycle` row is genuinely fresh (`_is_fresh_lifecycle`
+— zero hours, zero wear); on every later restart, whatever the UAV has actually accumulated
+since is what gets loaded instead, so the seed cannot silently overwrite real history. This
+was verified directly: three UAVs boot to health scores of 100 / ~89 / ~43 with no mission
+run, `/fleet/rankings` places UAV-03 first, and after 25 more seconds of idle ticking the
+seeded wear had visibly propagated through the residual/anomaly chain into a real NO-GO / a
+real CAUTION rather than staying a static injected number.
+
+**The migration (`app/db/session.py::_ensure_column`).** SQLite's `ALTER TABLE ... ADD
+COLUMN` is metadata-only and never rewrites existing rows, which is exactly why every
+earlier phase avoided needing one — a new *table* is something `Base.metadata.create_all()`
+already handles for free, but a new *column* on a table that already exists is not.
+`_ensure_column` is a deliberately narrow substitute for a real migration framework (there is
+no Alembic in this project): it checks `PRAGMA table_info(table)` for the column and runs
+the `ALTER TABLE` only if it is missing, called once from `init_db()` right after
+`create_all()`. `Mission.uav_id` uses a SQL-level `server_default`, not just a Python-side
+`default=`, specifically so this backfill gives every pre-existing row a real value rather
+than `NULL`.
+
+**Every per-engine endpoint gained a `uav_id` query parameter**, defaulting to
+`DEFAULT_UAV_ID` ("UAV-01") so an old caller — or the frontend before its own uav_id
+threading — gets exactly the engine it always got. This is genuinely every route in
+`control.py`, plus `/twin/diagnosis`, `/optimize/operating-point` (only when
+`use_current_engine_health` is set — the optimizer never reads live state otherwise),
+`/lifecycle/summary` and `/lifecycle/maintenance-action`, and `/performance-maps/live-point`.
+`/simulate/scenario` and its siblings deliberately did **not** gain one: a Test Bench run's
+starting wear comes from `initial_fault_severities` in the request body, never from a live
+engine, so the computation is identical regardless of which UAV happens to be selected in
+the UI at the time — threading a dead parameter through it would have been noise. An
+unknown `uav_id` on any route that does need one is a 404, not a `KeyError` leaking out as
+a 500 (`control.py::_entry`).
+
+**WebSockets.** `ConnectionManager.active` became `dict[str, list[WebSocket]]` keyed by
+uav_id; `/ws/telemetry?uav_id=...` only ever receives that UAV's frames, and
+`broadcast_json` is kept as a thin alias for "broadcast to the default UAV" so nothing
+calling it needed to change. A second, separate manager (`FleetOverviewConnectionManager`)
+backs the new `/ws/fleet-overview` — a single shared list, not keyed by UAV, since every
+subscriber there watches the same fleet-wide ranking — pushed every ~1.5 s by
+`run_fleet_overview_broadcast()`, a second background task alongside `run_simulation()`
+rather than piggy-backing on its 10 Hz loop, so a slow fleet-overview subscriber can never
+throttle live telemetry.
+
+**Ranking (`app/api/fleet.py`).** `GET /fleet/overview` and `GET /fleet/rankings` share one
+`_uav_snapshot()` — overall health, worst subsystem, RUL, both recommendation ladders,
+active fault count, lifetime hours — read straight off each UAV's `get_latest()` frame plus
+its lifecycle ledger; `rankings` just sorts that same list by `_urgency_key`, most-urgent
+first. Urgency sorts by `mission_reliability`'s ladder first (NO-GO outranks CAUTION
+outranks GO), then `recovery_reliability`'s, then raw health ascending as a tiebreaker — a
+UAV that cannot be trusted to finish its mission outranks one that merely cannot finish it
+gracefully. `build_fleet_overview()` is the one function both the REST routes and the
+WebSocket broadcast loop call, so the two views can never disagree.
+
+**Frontend: one more independent zustand store, not a rewrite of the other three.**
+`lib/fleet/store.ts`'s `useFleetStore` holds `selectedUavId` — the single piece of state
+every other per-engine view now scopes its requests to — plus the polled `/fleet/rankings`
+roster for the new Fleet page. `lib/store.ts`, `lib/lifecycle/store.ts` and
+`lib/testbench/store.ts` each read `useFleetStore.getState().selectedUavId` at request time
+(a `withUav()` helper appends it as a query param) rather than importing one merged store,
+matching this codebase's existing pattern of independent per-page stores. Reacting to a
+switch — resetting the live buffer, re-fetching missions and mission status, reloading the
+lifecycle summary — is done via `useFleetStore.subscribe(...)` registered once at each
+store's module scope, not inside a component effect, so the reset behaviour is identical no
+matter where the switch was triggered from (the Fleet page's roster cards, or
+`MissionHeader`'s persistent selector). `useTelemetryStream` is the one exception that has
+to live inside a component: it owns a `ReconnectingSocket` across renders, so `uavId` is a
+plain `useEffect` dependency there, tearing down the old UAV's socket and opening the newly
+selected one's.
+
 ## Backend module responsibilities
 
 | Module | Responsibility |
@@ -538,6 +642,9 @@ the case this layer exists to catch. Every channel Part B did not build a fusion
 | `app/api/scenario.py` | **Phase 4** — `/simulate/scenario`, its validity envelope, and run history |
 | `app/api/optimizer.py` | **Phase 4** — `/optimize/operating-point` and the objective list |
 | `app/core/compute_budget.py` | **Phase 4** — one compute slot + GIL yields so heavy work does not starve the live broadcast |
+| `app/core/fleet_registry.py` | **Phase 6** — `FleetEntry`/`FleetRegistry`, starting-wear seeding, `lifecycle_engine_id` |
+| `app/core/uav_ids.py` | **Phase 6** — `UAV_IDS`, `DEFAULT_UAV_ID`; split out to avoid a circular import |
+| `app/api/fleet.py` | **Phase 6** — `/fleet/overview`, `/fleet/rankings`, and the `/ws/fleet-overview` broadcast loop |
 
 ## Frontend component responsibilities
 
@@ -574,6 +681,11 @@ render unchanged against the extended contract because every new field is option
 | `components/testbench/MissionPresetCards` | **Phase 4** — three presets with "Apply to Live Engine" |
 | `components/testbench/ScenarioHistoryList` | **Phase 4** — past `scenario_runs`, reloadable into the builder |
 | `lib/testbench/*` | **Phase 4** — separate types, REST client and store from the live path |
+| `app/fleet/page.tsx` | **Phase 6** — the fleet route: summary header, roster grid, per-UAV trend charts |
+| `components/fleet/FleetSummaryHeader` | **Phase 6** — fleet-wide GO/CAUTION/NO-GO counts and total active faults |
+| `components/fleet/FleetRosterGrid` | **Phase 6** — one card per UAV, ranked; click selects that UAV and navigates |
+| `components/fleet/FleetTrendMiniCharts` | **Phase 6** — per-UAV health trend, reusing the Lifecycle view's series |
+| `lib/fleet/store.ts` | **Phase 6** — `selectedUavId`, the single state every other store scopes requests to |
 
 ## Still ahead
 
@@ -590,3 +702,15 @@ mean-value combustion model has no oxygen limit on the rich side, which is why t
 trim is confined to the AFR band the schedule already covers; modelling best-power mixture
 properly would change the live simulation too, and is a Phase 2 change rather than a Phase
 4 one.
+
+Phase 6 has three of its own. The Phase 1 mock generator (`USE_MOCK=true`) stays
+single-engine — it is a demo-safety fallback for when the physics model itself cannot run,
+not something worth generalising a second time. `CORS_ORIGINS` still defaults to
+`http://localhost:3000` only; this project's frontend dev server runs on 3005 (3000 is
+occupied by an unrelated local project on the development machine this was built on), so a
+real deployment — or a differently-numbered local setup — needs `CORS_ORIGINS` set
+explicitly to whatever origin the frontend is actually served from, same as it always did.
+And three fixed UAV ids (`app/core/uav_ids.py::UAV_IDS`) is a roster, not a fleet-management
+system — adding or retiring an airframe means editing that constant and restarting, not an
+admin action; see docs/deployment-roadmap.md for what a real squadron deployment would need
+instead.

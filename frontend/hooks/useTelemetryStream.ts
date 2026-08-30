@@ -8,6 +8,7 @@
 import { useEffect } from "react";
 import { ReconnectingSocket } from "@/lib/websocket";
 import { useTelemetryStore } from "@/lib/store";
+import { useFleetStore } from "@/lib/fleet/store";
 import type { TelemetryFrame } from "@/lib/types";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws/telemetry";
@@ -31,18 +32,31 @@ function authorizedUrl(url: string): string {
   return `${url}${separator}token=${encodeURIComponent(AUTH_TOKEN)}`;
 }
 
+/**
+ * Phase 6: the socket is scoped to one UAV (`/ws/telemetry?uav_id=...`) — the backend
+ * only broadcasts that UAV's frames to it. `uavId` is a hook dependency below, so
+ * switching the fleet selector tears down the old socket and opens a fresh one against
+ * the newly selected UAV, rather than leaving the dashboard subscribed to whichever
+ * engine was picked when the page first mounted.
+ */
+function uavScopedUrl(uavId: string): string {
+  const separator = WS_URL.includes("?") ? "&" : "?";
+  return authorizedUrl(`${WS_URL}${separator}uav_id=${encodeURIComponent(uavId)}`);
+}
+
 export function useTelemetryStream(): void {
   const pushFrame = useTelemetryStore((s) => s.pushFrame);
   const setStatus = useTelemetryStore((s) => s.setStatus);
+  const uavId = useFleetStore((s) => s.selectedUavId);
 
   useEffect(() => {
     const socket = new ReconnectingSocket<TelemetryFrame>({
-      url: authorizedUrl(WS_URL),
+      url: uavScopedUrl(uavId),
       onMessage: (frame) => pushFrame(frame),
       onStatusChange: (status) => setStatus(status),
     });
     socket.connect();
     return () => socket.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [uavId]);
 }

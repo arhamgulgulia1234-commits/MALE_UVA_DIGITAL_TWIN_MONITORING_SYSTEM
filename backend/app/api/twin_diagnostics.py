@@ -8,14 +8,19 @@ future "diagnostics" panel in the UI.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
+
+from app.core.uav_ids import DEFAULT_UAV_ID
 
 router = APIRouter(prefix="/twin", tags=["diagnostics"])
 
 
 @router.get("/diagnosis")
-async def diagnosis(request: Request) -> dict:
-    sim = request.app.state.sim
+async def diagnosis(request: Request, uav_id: str = DEFAULT_UAV_ID) -> dict:
+    try:
+        sim = request.app.state.fleet.get(uav_id).sim
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
     diagnostics = getattr(sim, "diagnostics", None)
     if diagnostics is None:
         return {

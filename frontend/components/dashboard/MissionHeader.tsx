@@ -4,6 +4,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { useTelemetryStore } from "@/lib/store";
+import { useFleetStore } from "@/lib/fleet/store";
+import { UAV_IDS } from "@/lib/fleet/types";
 import type { ConnectionStatus } from "@/lib/websocket";
 import { formatClock } from "@/lib/format";
 import type { MissionPhase, Recommendation, RecoveryRecommendation } from "@/lib/types";
@@ -93,6 +95,8 @@ const CONN_LABEL: Record<ConnectionStatus, { label: string; tone: string }> = {
 export function MissionHeader() {
   const latest = useTelemetryStore((s) => s.latest);
   const status = useTelemetryStore((s) => s.status);
+  const selectedUavId = useFleetStore((s) => s.selectedUavId);
+  const setSelectedUavId = useFleetStore((s) => s.setSelectedUavId);
   const [elapsedS, setElapsedS] = useState(0);
   const [startedAt] = useState(() => Date.now());
 
@@ -122,6 +126,25 @@ export function MissionHeader() {
             <p className="text-[11px] text-slate-500">MALE UAV Piston Engine PHM — Mock Telemetry</p>
           </div>
         </div>
+
+        {/* Phase 6: persistent UAV selector — the single control that scopes every
+            other panel on this page, the Test Bench and the Lifecycle view to one
+            engine. Living in the header rather than each page means switching UAVs
+            once follows the operator to every view instead of resetting per page. */}
+        <label className="flex items-center gap-1.5 text-[11px]">
+          <span className="uppercase tracking-wider text-slate-500">UAV</span>
+          <select
+            value={selectedUavId}
+            onChange={(e) => setSelectedUavId(e.target.value)}
+            className="rounded-md border border-base-border bg-base-panel px-2 py-1 font-display text-xs font-semibold text-slate-200 outline-none focus:border-status-cyan/60"
+          >
+            {UAV_IDS.map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div className="ml-auto flex items-center gap-4 sm:gap-6">
           <div className="hidden flex-col items-end sm:flex">
