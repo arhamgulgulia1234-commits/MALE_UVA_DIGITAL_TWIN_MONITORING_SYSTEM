@@ -25,6 +25,13 @@ const config: Config = {
           red: "#ef4a5f",
           idle: "#5b6b82",
         },
+        // Brand gold, sampled from the VAYUDRISHTI emblem — deliberately its own token
+        // rather than reusing `status.amber` (a near neighbour in hue). The two must stay
+        // visually distinguishable: amber means CAUTION somewhere in the mission-critical
+        // color system, and the logo's gold must never be mistaken for that.
+        brand: {
+          gold: "#dda345",
+        },
       },
       fontFamily: {
         mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "monospace"],

@@ -178,10 +178,14 @@ export function ControlDeck() {
               <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
                 Sensor Faults · instrumentation only
               </span>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                {SENSOR_FAULT_CATALOG.map((meta) => {
+              <div className="grid grid-cols-2 gap-2">
+                {SENSOR_FAULT_CATALOG.map((meta, i) => {
                   const severity = activeSensorFaults.get(meta.type);
                   const isActive = severity !== undefined;
+                  // Odd-length catalog: let the last button take the full row instead of
+                  // leaving a dangling half-empty row underneath the rest.
+                  const isLastOfOddRow =
+                    i === SENSOR_FAULT_CATALOG.length - 1 && SENSOR_FAULT_CATALOG.length % 2 === 1;
                   return (
                     <button
                       key={meta.type}
@@ -193,8 +197,9 @@ export function ControlDeck() {
                       title={meta.description}
                       className={clsx(
                         "flex flex-col items-start gap-0.5 rounded-md border px-2 py-1.5 text-left transition-colors",
+                        isLastOfOddRow && "col-span-2",
                         isActive
-                          ? "border-status-cyan/60 bg-status-cyan/15 text-status-cyan"
+                          ? severityTone(severity)
                           : "border-base-border text-slate-400 hover:border-status-cyan/30"
                       )}
                     >
@@ -204,7 +209,7 @@ export function ControlDeck() {
                       <span className="text-[10px] opacity-80">
                         {isActive
                           ? `${Math.round(severity * 100)}% · tap to clear`
-                          : `corrupt ${meta.channel}`}
+                          : meta.corruptionKind}
                       </span>
                     </button>
                   );

@@ -31,6 +31,12 @@ export interface EnginePart {
   displayName: string;
   /** Two or three plain-language sentences — read by someone who is not an engine person. */
   description: string;
+  /**
+   * Under-8-word fragment for the Flow Diagram's fixed-slot labels, which have no room
+   * for `description`'s full sentences. The click-to-inspect panel still shows the full
+   * `description` — this is only ever shown alongside the part name in a label box.
+   */
+  short_label: string;
   /** How the part identifies itself to the click/selection system in the 3D scene. */
   meshRefKey: string;
   /**
@@ -59,6 +65,13 @@ const CYL_DESCRIPTIONS: Record<number, string> = {
   4: "Rear left cylinder. Fires last in the sequence, completing one full crankshaft revolution's worth of power strokes. Persistent roughness here with normal exhaust temperature usually points at the mount or the piston rings rather than combustion.",
 };
 
+const CYL_SHORT_LABELS: Record<number, string> = {
+  1: "Front-right cylinder, fires first in sequence",
+  2: "Front-left cylinder, opposite its right partner",
+  3: "Rear-right cylinder, runs slightly warmer",
+  4: "Rear-left cylinder, fires last in sequence",
+};
+
 /** Every clickable part in the cutaway, in the order the Module Map lists them. */
 export const ENGINE_PARTS: EnginePart[] = [
   // --- combustion ---------------------------------------------------------
@@ -73,6 +86,7 @@ export const ENGINE_PARTS: EnginePart[] = [
       id: `cylinder-${i + 1}`,
       displayName: `Cylinder ${i + 1}`,
       description: CYL_DESCRIPTIONS[i + 1]!,
+      short_label: CYL_SHORT_LABELS[i + 1]!,
       meshRefKey: `cylinder-${i + 1}`,
       relatedTelemetryFields: [
         `cylinders[${i}].egt_c`,
@@ -104,6 +118,7 @@ export const ENGINE_PARTS: EnginePart[] = [
     displayName: "Crankshaft & Prop Hub",
     description:
       "The shaft that turns each cylinder's power stroke into rotation, and the hub stub the propeller bolts to. Its speed in the 3D view is driven directly by live RPM, so it visibly slows and spools with the engine. Because every cylinder feeds into it, roughness in the combustion side shows up here as torsional vibration.",
+    short_label: "Converts combustion strokes into propeller rotation",
     meshRefKey: "crankshaft",
     relatedTelemetryFields: ["rpm", "fused_rpm", "airspeed_ms"],
     backendModule: "backend/app/physics/engine_model.py",
@@ -118,6 +133,7 @@ export const ENGINE_PARTS: EnginePart[] = [
     displayName: "Crankcase & Oil System",
     description:
       "The central case that carries the crankshaft, plus the sump and pump that keep pressurised oil moving through the bearings. Oil pressure falling while oil temperature climbs is the classic signature of a pump or bearing problem. This is the one subsystem where a slow trend matters more than any single reading.",
+    short_label: "Houses crankshaft; pumps pressurized oil to bearings",
     meshRefKey: "crankcase-oil",
     relatedTelemetryFields: [
       "oil_pressure_kpa",
@@ -139,6 +155,7 @@ export const ENGINE_PARTS: EnginePart[] = [
     displayName: "Turbocharger",
     description:
       "Exhaust gas spins the turbine wheel, which drives the compressor wheel on the same shaft to force extra air into the engine. A worn turbo does not simply produce less boost — it takes noticeably longer to respond, so the wheels in the 3D view lag behind the boost the engine is asking for. That lag is modelled as a lengthened spool time constant.",
+    short_label: "Exhaust-driven turbine, shared shaft with compressor",
     meshRefKey: "turbocharger",
     relatedTelemetryFields: [
       "boost_pressure_kpa",
@@ -156,6 +173,7 @@ export const ENGINE_PARTS: EnginePart[] = [
     displayName: "Wastegate",
     description:
       "A hinged flap that dumps exhaust around the turbine instead of through it, which is how boost is held at a target instead of running away. A healthy wastegate moves smoothly; a worn linkage sticks and judders, and you can see that in the 3D flap's motion. It shares the turbo health index because it is part of the same control loop.",
+    short_label: "Bypasses exhaust to regulate turbo boost",
     meshRefKey: "wastegate",
     relatedTelemetryFields: ["boost_pressure_kpa", "manifold_pressure_kpa"],
     backendModule: "backend/app/physics/turbo_model.py",
@@ -169,6 +187,7 @@ export const ENGINE_PARTS: EnginePart[] = [
     displayName: "Intake Manifold",
     description:
       "The plenum and runners that carry compressed air from the compressor outlet to each cylinder head. Arrow speed and density along the cyan path track live boost pressure, so the induction side visibly works harder as the turbo comes up. A clogging air filter starves this path and shows up as manifold pressure falling short of the boost being produced.",
+    short_label: "Distributes compressed air to each cylinder",
     meshRefKey: "intake-manifold",
     relatedTelemetryFields: [
       "manifold_pressure_kpa",
@@ -187,6 +206,7 @@ export const ENGINE_PARTS: EnginePart[] = [
     displayName: "Throttle Body",
     description:
       "The butterfly valve between the compressor and the plenum that sets how much of the available charge air actually reaches the engine. It is the pilot's direct lever on power, and every other induction number downstream moves when it does. Its housing sits low and forward on the intake trunk in the cutaway.",
+    short_label: "Regulates airflow between compressor and engine",
     meshRefKey: "throttle-body",
     relatedTelemetryFields: ["manifold_pressure_kpa", "rpm", "mission_phase"],
     backendModule: "backend/app/physics/engine_model.py",
@@ -203,6 +223,7 @@ export const ENGINE_PARTS: EnginePart[] = [
     displayName: "Exhaust Manifold",
     description:
       "Headers from all four cylinder heads merging into a collector that runs under the case and feeds the turbine. Flow here is driven by fuel burn rather than boost, because exhaust mass is what the engine has already consumed. Watching the two paths on different signals is what makes turbo lag visible in the diagram.",
+    short_label: "Collects cylinder exhaust, feeds the turbine",
     meshRefKey: "exhaust-manifold",
     relatedTelemetryFields: [
       "fuel_flow_lph",

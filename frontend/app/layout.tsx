@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Rajdhani } from "next/font/google";
+import { PRODUCT_NAME, TAGLINE } from "@/lib/branding";
 import "./globals.css";
 
 const jetbrainsMono = JetBrains_Mono({
@@ -17,7 +18,7 @@ const rajdhani = Rajdhani({
 });
 
 export const metadata: Metadata = {
-  title: "SIH26054 · Aero Engine Digital Twin",
+  title: `${PRODUCT_NAME} — ${TAGLINE}`,
   description:
     "AI-Enabled Real-Time Digital Twin for Health Monitoring, Fault Prediction and Mission Reliability Enhancement of Aero Piston Engines used in MALE UAVs.",
 };

@@ -83,53 +83,55 @@ export function EngineCutaway3D() {
       glow="cyan"
       className="h-full"
       bodyClassName="p-0"
+      headerRight={<ViewModeToggle mode={mode} onChange={setMode} />}
     >
-      <div className="relative h-[340px] w-full overflow-hidden rounded-b-xl">
-        <Canvas
-          camera={{ position: [3.9, 2.5, 4.6], fov: 42 }}
-          dpr={[1, 1.75]}
-          gl={{ antialias: true, powerPreference: "high-performance" }}
-          onPointerMissed={clear}
-        >
-          <color attach="background" args={["#0a0e14"]} />
-          <fog attach="fog" args={["#0a0e14", 8, 16]} />
-          <PartSelectionProvider value={selection}>
-            <Scene xray={xray} />
-          </PartSelectionProvider>
-          <CameraRig part={selectedPart} panelOffset={selectedPart !== null} />
-          <OrbitControls
-            makeDefault
-            enablePan={false}
-            minDistance={3.4}
-            maxDistance={11}
-            autoRotate={!xray && !selectedId}
-            autoRotateSpeed={0.45}
-            target={[0, 0, 0]}
-          />
-        </Canvas>
-
-        {selectedPart && mode !== "modules" && (
-          <PartDetailPanel part={selectedPart} onClose={clear} />
-        )}
-
-        {mode === "modules" && (
-          <ModuleMap selectedId={selectedId} onSelect={fromModuleMap} />
-        )}
-
-        <ViewModeToggle mode={mode} onChange={setMode} />
-        {selectedPart && mode !== "modules" && (
-          <button
-            onClick={clear}
-            className="absolute bottom-3 right-3 z-20 rounded-lg border border-base-border bg-base-bg/85 px-2.5 py-1 font-mono text-[10px] text-slate-400 backdrop-blur transition-colors hover:border-status-cyan/40 hover:text-status-cyan"
+      <div className="flex flex-col overflow-hidden rounded-b-xl">
+        <div className="relative h-[340px] w-full overflow-hidden">
+          <Canvas
+            camera={{ position: [3.9, 2.5, 4.6], fov: 42 }}
+            dpr={[1, 1.75]}
+            gl={{ antialias: true, powerPreference: "high-performance" }}
+            onPointerMissed={clear}
           >
-            Reset View
-          </button>
-        )}
-        {!selectedPart && mode === "full" && (
-          <div className="pointer-events-none absolute bottom-3 right-3 font-mono text-[9px] text-slate-600">
-            click a part to inspect
-          </div>
-        )}
+            <color attach="background" args={["#0a0e14"]} />
+            <fog attach="fog" args={["#0a0e14", 8, 16]} />
+            <PartSelectionProvider value={selection}>
+              <Scene xray={xray} />
+            </PartSelectionProvider>
+            <CameraRig part={selectedPart} panelOffset={selectedPart !== null} />
+            <OrbitControls
+              makeDefault
+              enablePan={false}
+              minDistance={3.4}
+              maxDistance={11}
+              autoRotate={!xray && !selectedId}
+              autoRotateSpeed={0.45}
+              target={[0, 0, 0]}
+            />
+          </Canvas>
+
+          {selectedPart && mode !== "modules" && (
+            <PartDetailPanel part={selectedPart} onClose={clear} />
+          )}
+
+          {mode === "modules" && (
+            <ModuleMap selectedId={selectedId} onSelect={fromModuleMap} />
+          )}
+
+          {selectedPart && mode !== "modules" && (
+            <button
+              onClick={clear}
+              className="absolute bottom-3 right-3 z-20 rounded-lg border border-base-border bg-base-bg/85 px-2.5 py-1 font-mono text-[10px] text-slate-400 backdrop-blur transition-colors hover:border-status-cyan/40 hover:text-status-cyan"
+            >
+              Reset View
+            </button>
+          )}
+          {!selectedPart && mode === "full" && (
+            <div className="pointer-events-none absolute bottom-3 right-3 font-mono text-[9px] text-slate-600">
+              click a part to inspect
+            </div>
+          )}
+        </div>
         <Legend xray={xray} />
       </div>
     </GlassCard>
@@ -345,7 +347,7 @@ function ViewModeToggle({
   onChange: (m: ViewMode) => void;
 }) {
   return (
-    <div className="absolute right-3 top-3 z-30 flex gap-1 rounded-lg border border-base-border bg-base-bg/85 p-1 backdrop-blur">
+    <div className="flex shrink-0 gap-1 rounded-lg border border-base-border bg-base-bg/60 p-1">
       {(
         [
           ["full", "Full Engine"],
@@ -370,10 +372,18 @@ function ViewModeToggle({
   );
 }
 
+/**
+ * Flow Diagram's intake/exhaust colour key.
+ *
+ * Lives in its own strip below the canvas rather than floating on top of it — the same
+ * fix as `ViewModeToggle` moving into the header, for the same reason: a fixed overlay
+ * anchored to the canvas competes with the bottom label row for the same screen space no
+ * matter how carefully it's positioned. Outside the canvas, it never can.
+ */
 function Legend({ xray }: { xray: boolean }) {
   if (!xray) return null;
   return (
-    <div className="absolute bottom-3 left-3 flex flex-col gap-1 rounded-lg border border-base-border bg-base-bg/85 px-2.5 py-2 backdrop-blur">
+    <div className="flex shrink-0 items-center gap-4 border-t border-base-border/70 px-4 py-1.5">
       {[
         ["#4FC8E8", "Intake air"],
         ["#3E8574", "Exhaust gas"],
