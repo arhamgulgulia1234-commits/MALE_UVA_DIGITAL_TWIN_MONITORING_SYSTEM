@@ -13,6 +13,8 @@
  * not having the feature.
  */
 import { ModeNav } from "@/components/nav/ModeNav";
+import { useFleetStore } from "@/lib/fleet/store";
+import { UAV_IDS } from "@/lib/fleet/types";
 import { MissionPresetCards } from "@/components/testbench/MissionPresetCards";
 import { OptimizerPanel } from "@/components/testbench/OptimizerPanel";
 import { ScenarioBuilder } from "@/components/testbench/ScenarioBuilder";
@@ -20,6 +22,9 @@ import { ScenarioHistoryList } from "@/components/testbench/ScenarioHistoryList"
 import { ScenarioResultsView } from "@/components/testbench/ScenarioResultsView";
 
 export default function TestBenchPage() {
+  const selectedUavId = useFleetStore((s) => s.selectedUavId);
+  const setSelectedUavId = useFleetStore((s) => s.setSelectedUavId);
+
   return (
     <div className="flex min-h-screen flex-col">
       {/* Distinct header treatment from the live dashboard's cyan: amber hazard striping,
@@ -47,7 +52,25 @@ export default function TestBenchPage() {
             </div>
           </div>
 
-          <ModeNav className="ml-auto" />
+          {/* Phase 6: same persistent UAV selector as MissionHeader on the Live
+              Dashboard — the optimizer's "use current engine health", "apply preset"
+              and the live map marker below all act on whichever UAV this picks. */}
+          <label className="ml-auto flex items-center gap-1.5 text-[11px] lg:ml-0">
+            <span className="uppercase tracking-wider text-slate-500">UAV</span>
+            <select
+              value={selectedUavId}
+              onChange={(e) => setSelectedUavId(e.target.value)}
+              className="rounded-md border border-base-border bg-base-panel px-2 py-1 font-display text-xs font-semibold text-slate-200 outline-none focus:border-status-amber/60"
+            >
+              {UAV_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <ModeNav />
 
           <div className="w-full rounded-md border border-status-amber/50 bg-status-amber/10 px-3 py-1.5 text-center lg:w-auto">
             <span className="animate-pulseGlow font-display text-xs font-bold uppercase tracking-[0.22em] text-status-amber">

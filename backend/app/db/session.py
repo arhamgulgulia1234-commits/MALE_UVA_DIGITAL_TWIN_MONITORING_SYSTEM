@@ -49,9 +49,46 @@ def _set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
 
 
+#: Phase 6: columns added to an already-shipped table, keyed by (table, column) so
+#: `_ensure_column` knows what to backfill. Every other schema change in this project has
+#: been a brand-new table, which `create_all()` handles for free; this is the one case
+#: where `create_all()` cannot help, because it only creates *missing* tables and never
+#: alters an existing one's columns. `_ensure_column` is a deliberately narrow, additive
+#: substitute for a real migration framework (no Alembic in this project) — safe here
+#: only because SQLite's `ALTER TABLE ADD COLUMN` is a metadata-only change that never
+#: rewrites existing rows.
+_COLUMN_MIGRATIONS: list[tuple[str, str, str, str]] = [
+    # (table, column, sql_type, default_sql)
+    ("missions", "uav_id", "VARCHAR(40)", "'UAV-01'"),
+]
+
+
+def _ensure_column(table: str, column: str, sql_type: str, default_sql: str) -> None:
+    with engine.connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if table not in tables:
+            return  # create_all() will build it with the column already present
+        existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+        if column in existing:
+            return
+        conn.exec_driver_sql(
+            f"ALTER TABLE {table} ADD COLUMN {column} {sql_type} "
+            f"NOT NULL DEFAULT {default_sql}"
+        )
+        conn.commit()
+
+
 def init_db() -> None:
-    """Create tables if they do not exist. Safe to call on every startup."""
+    """Create tables if they do not exist, then backfill any columns added to a table
+    that already existed. Safe to call on every startup — both steps are idempotent."""
     Base.metadata.create_all(engine)
+    for migration in _COLUMN_MIGRATIONS:
+        _ensure_column(*migration)
 
 
 def get_session() -> Session:

@@ -16,6 +16,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from app.core.security import auth_enabled, websocket_token_ok
+from app.core.uav_ids import DEFAULT_UAV_ID
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,57 @@ router = APIRouter()
 
 
 class ConnectionManager:
+    """Phase 6: one client list per UAV, so a dashboard watching UAV-02 never sees
+    UAV-01's frames and vice versa. Kept as a dict-of-lists rather than N separate
+    manager instances so `client_count` can still answer "how many dashboards total"
+    without the caller needing to know the fleet roster."""
+
+    def __init__(self) -> None:
+        self.active: dict[str, list[WebSocket]] = {}
+
+    async def connect(self, ws: WebSocket, uav_id: str = DEFAULT_UAV_ID) -> None:
+        await ws.accept()
+        self.active.setdefault(uav_id, []).append(ws)
+
+    def disconnect(self, ws: WebSocket, uav_id: str = DEFAULT_UAV_ID) -> None:
+        sockets = self.active.get(uav_id)
+        if sockets and ws in sockets:
+            sockets.remove(ws)
+
+    async def broadcast_to_uav(self, uav_id: str, payload: dict) -> None:
+        # Iterate a snapshot. `send_json` awaits, and during that await the endpoint
+        # coroutine for a *different* socket can notice its client has gone and call
+        # `disconnect()`, which removes an entry from this same list. Mutating a list
+        # while a `for` walks it by index makes the loop skip whichever element shifts
+        # into the vacated slot, so a client that is still connected silently misses that
+        # frame. Rapid tab open/close is exactly the workload that triggers it.
+        sockets = self.active.get(uav_id, [])
+        dead: list[WebSocket] = []
+        for ws in list(sockets):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws, uav_id)
+
+    async def broadcast_json(self, payload: dict) -> None:
+        """Backward-compat alias: broadcasts to the default UAV's subscribers only."""
+        await self.broadcast_to_uav(DEFAULT_UAV_ID, payload)
+
+    @property
+    def client_count(self) -> int:
+        return sum(len(sockets) for sockets in self.active.values())
+
+
+manager = ConnectionManager()
+
+
+class FleetOverviewConnectionManager:
+    """A single shared broadcast list for `/ws/fleet-overview` — unlike telemetry,
+    every client here watches the same fleet-wide summary, so there is nothing to
+    key by UAV."""
+
     def __init__(self) -> None:
         self.active: list[WebSocket] = []
 
@@ -35,12 +87,6 @@ class ConnectionManager:
             self.active.remove(ws)
 
     async def broadcast_json(self, payload: dict) -> None:
-        # Iterate a snapshot. `send_json` awaits, and during that await the endpoint
-        # coroutine for a *different* socket can notice its client has gone and call
-        # `disconnect()`, which removes an entry from this same list. Mutating a list
-        # while a `for` walks it by index makes the loop skip whichever element shifts
-        # into the vacated slot, so a client that is still connected silently misses that
-        # frame. Rapid tab open/close is exactly the workload that triggers it.
         dead: list[WebSocket] = []
         for ws in list(self.active):
             try:
@@ -55,7 +101,7 @@ class ConnectionManager:
         return len(self.active)
 
 
-manager = ConnectionManager()
+fleet_manager = FleetOverviewConnectionManager()
 
 
 @router.websocket("/ws/telemetry")
@@ -68,15 +114,36 @@ async def ws_telemetry(websocket: WebSocket) -> None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    await manager.connect(websocket)
+    uav_id = websocket.query_params.get("uav_id") or DEFAULT_UAV_ID
+    await manager.connect(websocket, uav_id)
     if auth_enabled():
-        logger.info("Telemetry client authenticated and connected")
+        logger.info("Telemetry client authenticated and connected (uav=%s)", uav_id)
     try:
         while True:
             # Control happens over REST, so nothing is expected from the client — but we
             # must await something to notice a disconnect.
             await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        manager.disconnect(websocket, uav_id)
     except Exception:
-        manager.disconnect(websocket)
+        manager.disconnect(websocket, uav_id)
+
+
+@router.websocket("/ws/fleet-overview")
+async def ws_fleet_overview(websocket: WebSocket) -> None:
+    if not websocket_token_ok(
+        websocket.headers.get("authorization"),
+        websocket.query_params.get("token"),
+    ):
+        logger.warning("Rejected fleet-overview WebSocket: bad or missing token")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await fleet_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        fleet_manager.disconnect(websocket)
+    except Exception:
+        fleet_manager.disconnect(websocket)

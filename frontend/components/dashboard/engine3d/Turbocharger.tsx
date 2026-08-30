@@ -4,12 +4,15 @@ import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useTelemetryStore } from "@/lib/store";
+import { PartOutline, usePartInteraction } from "./partSelection";
 import {
   COLORS,
   LAYOUT,
   boostToTurboVelocity,
   clamp01,
+  partMaterial,
   readFaults,
+  refreshMaterial,
 } from "./engine3dUtils";
 
 /**
@@ -32,6 +35,12 @@ export function Turbocharger({ xray }: { xray: boolean }) {
   /** Actual wheel speed, lagged behind the commanded speed by the spool constant. */
   const actualSpeed = useRef(0);
   const judder = useRef(0);
+
+  // Turbo and wastegate are separate registry entries. They are drawn as sibling groups
+  // below so a click on the flap selects the wastegate and stops there, rather than also
+  // hitting the turbine housing it is bolted to.
+  const turboSel = usePartInteraction("turbocharger");
+  const gateSel = usePartInteraction("wastegate");
 
   const bladeGeometry = useMemo(() => new THREE.BoxGeometry(0.035, 0.2, 0.09), []);
 
@@ -65,15 +74,24 @@ export function Turbocharger({ xray }: { xray: boolean }) {
     }
   });
 
-  const opacity = xray ? 0.35 : 1;
+  const mat = partMaterial(turboSel.visual, xray, 0.35);
+  const gateMat = partMaterial(gateSel.visual, xray, 0.35);
   const { x, y } = LAYOUT.turbo;
 
   return (
-    <group position={[x, y, 0]}>
+    <>
+    <group position={[x, y, 0]} {...turboSel.handlers}>
       {/* shared shaft */}
       <mesh rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[0.035, 0.035, 0.62, 10]} />
-        <meshStandardMaterial color="#c2cbd4" metalness={0.9} roughness={0.22} />
+        <meshStandardMaterial
+          color="#c2cbd4"
+          metalness={0.9}
+          roughness={0.22}
+          onUpdate={refreshMaterial}
+          transparent={mat.transparent}
+          opacity={mat.opacity}
+        />
       </mesh>
 
       {/* --- turbine side (exhaust driven, aft) --- */}
@@ -84,9 +102,11 @@ export function Turbocharger({ xray }: { xray: boolean }) {
             color={COLORS.exhaust}
             metalness={0.55}
             roughness={0.5}
-            transparent={xray}
-            opacity={opacity}
+            onUpdate={refreshMaterial}
+            transparent={mat.transparent}
+            opacity={mat.opacity}
           />
+          <PartOutline visual={turboSel.visual} />
         </mesh>
         {/* volute scroll */}
         <mesh rotation={[0, Math.PI / 2, 0]}>
@@ -95,8 +115,9 @@ export function Turbocharger({ xray }: { xray: boolean }) {
             color={COLORS.exhaust}
             metalness={0.5}
             roughness={0.55}
-            transparent={xray}
-            opacity={opacity}
+            onUpdate={refreshMaterial}
+            transparent={mat.transparent}
+            opacity={mat.opacity}
           />
         </mesh>
         <group ref={turbineWheel}>
@@ -107,7 +128,14 @@ export function Turbocharger({ xray }: { xray: boolean }) {
               position={[0, Math.cos(a) * 0.14, Math.sin(a) * 0.14]}
               rotation={[a, 0.5, 0]}
             >
-              <meshStandardMaterial color="#7f8a95" metalness={0.85} roughness={0.3} />
+              <meshStandardMaterial
+                color="#7f8a95"
+                metalness={0.85}
+                roughness={0.3}
+                onUpdate={refreshMaterial}
+                transparent={mat.transparent}
+                opacity={mat.opacity}
+              />
             </mesh>
           ))}
         </group>
@@ -121,9 +149,11 @@ export function Turbocharger({ xray }: { xray: boolean }) {
             color={COLORS.intake}
             metalness={0.55}
             roughness={0.45}
-            transparent={xray}
-            opacity={opacity}
+            onUpdate={refreshMaterial}
+            transparent={mat.transparent}
+            opacity={mat.opacity}
           />
+          <PartOutline visual={turboSel.visual} />
         </mesh>
         <mesh rotation={[0, Math.PI / 2, 0]}>
           <torusGeometry args={[0.28, 0.095, 10, 24]} />
@@ -131,8 +161,9 @@ export function Turbocharger({ xray }: { xray: boolean }) {
             color={COLORS.intake}
             metalness={0.5}
             roughness={0.5}
-            transparent={xray}
-            opacity={opacity}
+            onUpdate={refreshMaterial}
+            transparent={mat.transparent}
+            opacity={mat.opacity}
           />
         </mesh>
         <group ref={compressorWheel}>
@@ -143,7 +174,14 @@ export function Turbocharger({ xray }: { xray: boolean }) {
               position={[0, Math.cos(a) * 0.13, Math.sin(a) * 0.13]}
               rotation={[a, -0.5, 0]}
             >
-              <meshStandardMaterial color="#aeb8c2" metalness={0.9} roughness={0.25} />
+              <meshStandardMaterial
+                color="#aeb8c2"
+                metalness={0.9}
+                roughness={0.25}
+                onUpdate={refreshMaterial}
+                transparent={mat.transparent}
+                opacity={mat.opacity}
+              />
             </mesh>
           ))}
         </group>
@@ -155,32 +193,9 @@ export function Turbocharger({ xray }: { xray: boolean }) {
             metalness={0.4}
             roughness={0.6}
             side={THREE.DoubleSide}
-            transparent={xray}
-            opacity={opacity}
-          />
-        </mesh>
-      </group>
-
-      {/* --- wastegate: hinged flap on the turbine housing --- */}
-      <group position={[LAYOUT.wastegate.x - x, LAYOUT.wastegate.y - y, 0]}>
-        <mesh>
-          <boxGeometry args={[0.16, 0.16, 0.22]} />
-          <meshStandardMaterial
-            color={COLORS.darkMetal}
-            metalness={0.65}
-            roughness={0.45}
-            transparent={xray}
-            opacity={opacity}
-          />
-        </mesh>
-        <mesh ref={wastegate} position={[0.08, 0, 0]}>
-          <boxGeometry args={[0.19, 0.03, 0.19]} />
-          <meshStandardMaterial
-            color={COLORS.brass}
-            metalness={0.8}
-            roughness={0.32}
-            emissive={COLORS.brass}
-            emissiveIntensity={0.15}
+            onUpdate={refreshMaterial}
+            transparent={mat.transparent}
+            opacity={mat.opacity}
           />
         </mesh>
       </group>
@@ -193,11 +208,46 @@ export function Turbocharger({ xray }: { xray: boolean }) {
           metalness={0.45}
           roughness={0.6}
           side={THREE.DoubleSide}
-          transparent={xray}
-          opacity={opacity}
+          onUpdate={refreshMaterial}
+          transparent={mat.transparent}
+          opacity={mat.opacity}
         />
       </mesh>
     </group>
+
+    {/* --- wastegate: hinged flap on the turbine housing --- */}
+    <group
+      position={[LAYOUT.wastegate.x, LAYOUT.wastegate.y, 0]}
+      {...gateSel.handlers}
+    >
+      <mesh>
+        <boxGeometry args={[0.16, 0.16, 0.22]} />
+        <meshStandardMaterial
+          color={COLORS.darkMetal}
+          metalness={0.65}
+          roughness={0.45}
+          onUpdate={refreshMaterial}
+          transparent={gateMat.transparent}
+          opacity={gateMat.opacity}
+        />
+        <PartOutline visual={gateSel.visual} />
+      </mesh>
+      <mesh ref={wastegate} position={[0.08, 0, 0]}>
+        <boxGeometry args={[0.19, 0.03, 0.19]} />
+        <meshStandardMaterial
+          color={COLORS.brass}
+          metalness={0.8}
+          roughness={0.32}
+          emissive={COLORS.brass}
+          emissiveIntensity={0.15}
+          onUpdate={refreshMaterial}
+          transparent={gateMat.transparent}
+          opacity={gateMat.opacity}
+        />
+        <PartOutline visual={gateSel.visual} thickness={2} />
+      </mesh>
+    </group>
+    </>
   );
 }
 

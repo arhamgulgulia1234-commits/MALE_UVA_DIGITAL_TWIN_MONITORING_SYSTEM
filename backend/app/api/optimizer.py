@@ -28,6 +28,7 @@ from app.core.compute_budget import heavy_compute_slot
 from app.core.engine_params import PARAMS
 from app.core.models import OperatingPointRequest
 from app.core.security import require_token
+from app.core.uav_ids import DEFAULT_UAV_ID
 from app.ml.operating_point_optimizer import (
     OBJECTIVE_LABELS,
     OBJECTIVES,
@@ -40,13 +41,18 @@ router = APIRouter(prefix="/optimize", tags=["test-bench"])
 
 
 @router.post("/operating-point", dependencies=[Depends(require_token)])
-async def optimize_point(req: OperatingPointRequest, request: Request) -> dict:
+async def optimize_point(
+    req: OperatingPointRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
     """Recommend a throttle / mixture / timing setpoint for one objective."""
     health_state: dict[str, float] | None = None
     health_source = "pristine engine"
 
     if req.use_current_engine_health:
-        sim = request.app.state.sim
+        try:
+            sim = request.app.state.fleet.get(uav_id).sim
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
         if not hasattr(sim, "current_health_state"):
             raise HTTPException(
                 400,

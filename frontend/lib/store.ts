@@ -3,8 +3,14 @@
  * frames; every dashboard component reads from here instead of touching the WebSocket
  * directly. Also owns the (fire-and-forget) control actions the ControlDeck calls, which
  * POST to the mock backend's /control/* endpoints.
+ *
+ * Phase 6: every one of those endpoints is now uav_id-aware on the backend, so every
+ * request this store makes carries `?uav_id=<selected>` (see `withUav` below) — read
+ * from `useFleetStore`, not duplicated here, so a UAV switch anywhere in the app is
+ * picked up by every request the very next time one fires.
  */
 import { create } from "zustand";
+import { useFleetStore } from "./fleet/store";
 import type { ConnectionStatus } from "./websocket";
 import type {
   FaultType,
@@ -71,6 +77,12 @@ interface TelemetryStore {
   stopReplay: () => Promise<void>;
   loadMissionReport: (missionId: number) => Promise<void>;
   clearMissionReport: () => void;
+
+  // ---- Phase 6: fleet UAV switching ----
+  /** Clears everything scoped to "whichever engine was previously selected" so a
+   * switch never shows a frame of buffer mixing two UAVs' telemetry. Called from the
+   * useFleetStore subscription below, not by any component directly. */
+  resetForUavSwitch: () => void;
 }
 
 /**
@@ -83,12 +95,20 @@ function authHeaders(): Record<string, string> {
   return AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {};
 }
 
+/** Appends the currently selected UAV's id as a query param on every request this
+ * store makes — every endpoint it calls is per-engine on the backend. */
+function withUav(path: string): string {
+  const uavId = useFleetStore.getState().selectedUavId;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}uav_id=${encodeURIComponent(uavId)}`;
+}
+
 async function postJson<T = unknown>(
   path: string,
   body: unknown
 ): Promise<T | null> {
   try {
-    const res = await fetch(`${API_URL}${path}`, {
+    const res = await fetch(`${API_URL}${withUav(path)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
@@ -104,7 +124,7 @@ async function postJson<T = unknown>(
 
 async function getJson<T = unknown>(path: string): Promise<T | null> {
   try {
-    const res = await fetch(`${API_URL}${path}`, { headers: authHeaders() });
+    const res = await fetch(`${API_URL}${withUav(path)}`, { headers: authHeaders() });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -234,7 +254,39 @@ export const useTelemetryStore = create<TelemetryStore>((set, get) => ({
   },
 
   clearMissionReport: () => set({ missionReport: null }),
+
+  resetForUavSwitch: () =>
+    set({
+      latest: null,
+      buffer: [],
+      activeMissionId: null,
+      isRecording: false,
+      replayMissionId: null,
+      missionReport: null,
+    }),
 }));
+
+// ---- Phase 6: react to a fleet UAV switch, wherever it was triggered from ---------
+//
+// A cross-store subscription rather than a React effect in some component: the switch
+// can be triggered from the fleet page, the MissionHeader selector, or (later) anywhere
+// else, and every one of those should produce the exact same reset-and-resync behaviour
+// without each caller needing to remember to do it.
+useFleetStore.subscribe((state, prevState) => {
+  if (state.selectedUavId === prevState.selectedUavId) return;
+  const store = useTelemetryStore.getState();
+  store.resetForUavSwitch();
+  void store.refreshMissions();
+  void getJson<{ recording: boolean; mission_id: number | null }>(
+    "/control/mission/status"
+  ).then((status) => {
+    if (!status) return;
+    useTelemetryStore.setState({
+      activeMissionId: status.mission_id,
+      isRecording: status.recording,
+    });
+  });
+});
 
 // convenience selector helpers -------------------------------------------------
 

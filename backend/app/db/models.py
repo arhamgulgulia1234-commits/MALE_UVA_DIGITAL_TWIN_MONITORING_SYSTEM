@@ -36,6 +36,14 @@ class Mission(Base):
     __tablename__ = "missions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    #: Phase 6: which UAV this mission was flown on. `server_default` (not just
+    #: `default`) matters here — this column was added to an already-shipped table, so
+    #: the migration in app/db/session.py::_ensure_column runs a raw `ALTER TABLE ...
+    #: ADD COLUMN ... DEFAULT '...'`, which needs a SQL-level default to backfill
+    #: existing rows; a Python-side `default=` only applies to new ORM inserts.
+    uav_id: Mapped[str] = mapped_column(
+        String(40), nullable=False, server_default="UAV-01"
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     mission_profile_name: Mapped[str] = mapped_column(String(120), default="standard")

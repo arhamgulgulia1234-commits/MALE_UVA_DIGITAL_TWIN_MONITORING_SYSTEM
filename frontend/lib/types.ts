@@ -190,6 +190,9 @@ export interface RPMSensorInnovations {
 /** A recorded mission, as listed by GET /control/missions. */
 export interface MissionSummary {
   id: number;
+  /** Phase 6: which UAV this mission was flown on. Defaults to "UAV-01" for every
+   * mission recorded before the fleet feature existed. */
+  uav_id: string;
   started_at: string | null;
   ended_at: string | null;
   mission_profile_name: string;

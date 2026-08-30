@@ -6,6 +6,7 @@
  * rather than imported from there — this page is not part of the Test Bench and should
  * not need to pull in its store or its scenario/optimizer types to make one GET.
  */
+import { useFleetStore } from "../fleet/store";
 import type {
   LifecycleSummary,
   MaintenanceActionRequest,
@@ -53,6 +54,16 @@ async function toError(res: Response): Promise<LifecycleError> {
   return new LifecycleError(`Request failed (${res.status})`, res.status);
 }
 
+/** Every endpoint in this file is per-engine on the backend. Defaults to whichever UAV
+ * the fleet selector currently has picked; an explicit `uavId` overrides that — used by
+ * FleetTrendMiniCharts, which needs all three UAVs' summaries at once regardless of
+ * which single one is currently selected elsewhere in the app. */
+function withUav(path: string, uavId?: string): string {
+  const resolved = uavId ?? useFleetStore.getState().selectedUavId;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}uav_id=${encodeURIComponent(resolved)}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -64,14 +75,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function fetchLifecycleSummary(): Promise<LifecycleSummary> {
-  return request<LifecycleSummary>("/lifecycle/summary");
+export function fetchLifecycleSummary(uavId?: string): Promise<LifecycleSummary> {
+  return request<LifecycleSummary>(withUav("/lifecycle/summary", uavId));
 }
 
 export function postMaintenanceAction(
   body: MaintenanceActionRequest
 ): Promise<MaintenanceActionResponse> {
-  return request<MaintenanceActionResponse>("/lifecycle/maintenance-action", {
+  return request<MaintenanceActionResponse>(withUav("/lifecycle/maintenance-action"), {
     method: "POST",
     body: JSON.stringify(body),
   });

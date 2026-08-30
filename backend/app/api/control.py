@@ -6,8 +6,13 @@ and mission replay.
 Phase 4: the operating setpoint (throttle plus mixture and injection-timing trims) and
 the three optimizer-resolved mission presets. Purely additive — every Phase 1-3 route
 below is untouched.
+Phase 6: every route below gained a `uav_id` query parameter (default "UAV-01", so an
+old caller that never heard of the fleet still gets exactly the engine it always got).
+It selects which UAV's `SimulationLoop`/`ReplayEngine` the route acts on via
+`request.app.state.fleet.get(uav_id)` — the route bodies are otherwise unchanged from
+Phase 1-4.
 
-Every route here mutates the single shared SimulationLoop, and every route is guarded by
+Every route here mutates one UAV's SimulationLoop, and every route is guarded by
 `require_token` — one choke point for authentication, so hardening it later is a contained
 change (see app/core/security.py and docs/deployment-roadmap.md).
 """
@@ -21,6 +26,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from app.core import mission_presets
 from app.core.compute_budget import heavy_compute_slot
+from app.core.fleet_registry import FleetRegistry, lifecycle_engine_id
 from app.core.models import (
     AmbientTemperatureRequest,
     ApplyPresetRequest,
@@ -37,23 +43,36 @@ from app.core.models import (
     TimeScaleRequest,
 )
 from app.core.security import require_token
+from app.core.uav_ids import DEFAULT_UAV_ID
 from app.db.lifecycle_repository import lifecycle_repository
 from app.db.repository import repository
 from app.ml.mission_report import build_mission_report
 from app.sim.mission_profiles import SCENARIOS
-from app.sim.replay_engine import replay_engine
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/control", dependencies=[Depends(require_token)])
 
 
+def _fleet(request: Request) -> FleetRegistry:
+    return request.app.state.fleet
+
+
+def _entry(request: Request, uav_id: str):
+    try:
+        return _fleet(request).get(uav_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 # ---- Phase 1/2 controls -----------------------------------------------------
 
 
 @router.post("/fault")
-async def inject_fault(req: FaultInjectRequest, request: Request) -> dict:
-    sim = request.app.state.sim
+async def inject_fault(
+    req: FaultInjectRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
+    sim = _entry(request, uav_id).sim
     sim.inject_fault(req.type, req.severity, req.ramp_seconds)
 
     # Log the event against the active mission, if one is recording.
@@ -75,6 +94,7 @@ async def inject_fault(req: FaultInjectRequest, request: Request) -> dict:
     # commanded as well, otherwise the response looks like the call did nothing.
     return {
         "ok": True,
+        "uav_id": uav_id,
         "injected": req.type,
         "target_severity": req.severity,
         "ramp_seconds": req.ramp_seconds,
@@ -83,8 +103,10 @@ async def inject_fault(req: FaultInjectRequest, request: Request) -> dict:
 
 
 @router.post("/clear-fault")
-async def clear_fault(req: ClearFaultRequest, request: Request) -> dict:
-    sim = request.app.state.sim
+async def clear_fault(
+    req: ClearFaultRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
+    sim = _entry(request, uav_id).sim
     sim.clear_fault(req.fault_type)
     mission_id = getattr(sim, "active_mission_id", None)
     if mission_id is not None:
@@ -93,22 +115,28 @@ async def clear_fault(req: ClearFaultRequest, request: Request) -> dict:
 
 
 @router.post("/throttle")
-async def set_throttle(req: ThrottleRequest, request: Request) -> dict:
-    sim = request.app.state.sim
+async def set_throttle(
+    req: ThrottleRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
+    sim = _entry(request, uav_id).sim
     sim.set_throttle(req.value)
     return {"ok": True, "throttle": sim.throttle}
 
 
 @router.post("/time-scale")
-async def set_time_scale(req: TimeScaleRequest, request: Request) -> dict:
-    sim = request.app.state.sim
+async def set_time_scale(
+    req: TimeScaleRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
+    sim = _entry(request, uav_id).sim
     sim.set_time_scale(req.factor)
     return {"ok": True, "time_scale": sim.time_scale}
 
 
 @router.post("/phase")
-async def jump_phase(req: PhaseJumpRequest, request: Request) -> dict:
-    sim = request.app.state.sim
+async def jump_phase(
+    req: PhaseJumpRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
+    sim = _entry(request, uav_id).sim
     sim.jump_phase(req.phase)
     return {"ok": True, "phase": req.phase}
 
@@ -117,9 +145,11 @@ async def jump_phase(req: PhaseJumpRequest, request: Request) -> dict:
 
 
 @router.post("/sensor-fault")
-async def inject_sensor_fault(req: SensorFaultRequest, request: Request) -> dict:
+async def inject_sensor_fault(
+    req: SensorFaultRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
     """Corrupt what an instrument *reports*, leaving the engine physically healthy."""
-    sim = request.app.state.sim
+    sim = _entry(request, uav_id).sim
     if not hasattr(sim, "inject_sensor_fault"):
         raise HTTPException(400, "sensor faults require the physics backend (USE_MOCK=false)")
     sim.inject_sensor_fault(req.type, req.severity, req.ramp_seconds)
@@ -144,8 +174,10 @@ async def inject_sensor_fault(req: SensorFaultRequest, request: Request) -> dict
 
 
 @router.post("/clear-sensor-fault")
-async def clear_sensor_fault(req: ClearSensorFaultRequest, request: Request) -> dict:
-    sim = request.app.state.sim
+async def clear_sensor_fault(
+    req: ClearSensorFaultRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
+    sim = _entry(request, uav_id).sim
     if not hasattr(sim, "clear_sensor_fault"):
         raise HTTPException(400, "sensor faults require the physics backend")
     sim.clear_sensor_fault(req.fault_type)
@@ -160,9 +192,9 @@ async def clear_sensor_fault(req: ClearSensorFaultRequest, request: Request) -> 
 
 @router.post("/ambient-temperature")
 async def set_ambient_temperature(
-    req: AmbientTemperatureRequest, request: Request
+    req: AmbientTemperatureRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
 ) -> dict:
-    sim = request.app.state.sim
+    sim = _entry(request, uav_id).sim
     if not hasattr(sim, "set_ambient_temperature"):
         raise HTTPException(400, "requires the physics backend")
     sim.set_ambient_temperature(req.ambient_temperature_c)
@@ -180,8 +212,10 @@ async def list_scenarios() -> dict:
 
 
 @router.post("/scenario")
-async def apply_scenario(req: ScenarioRequest, request: Request) -> dict:
-    sim = request.app.state.sim
+async def apply_scenario(
+    req: ScenarioRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
+    sim = _entry(request, uav_id).sim
     if not hasattr(sim, "apply_scenario"):
         raise HTTPException(400, "requires the physics backend")
     result = sim.apply_scenario(req.scenario)
@@ -194,7 +228,9 @@ async def apply_scenario(req: ScenarioRequest, request: Request) -> dict:
 
 
 @router.post("/mission/start")
-async def start_mission(req: MissionStartRequest, request: Request) -> dict:
+async def start_mission(
+    req: MissionStartRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
     """Begin recording. Telemetry streams live either way; persistence only happens
     inside an explicit mission session.
 
@@ -204,18 +240,24 @@ async def start_mission(req: MissionStartRequest, request: Request) -> dict:
     `FaultState` wholesale, so a mission on an engine with real bearing wear starts
     already partially degraded instead of pretending every flight begins on a
     factory-fresh engine. The mock backend has no wear model to seed, so this is skipped
-    there exactly like every other Phase 4/5 physics-only control."""
-    sim = request.app.state.sim
+    there exactly like every other Phase 4/5 physics-only control.
+
+    Phase 6: the lifecycle ledger this seeds from is keyed by
+    `lifecycle_engine_id(uav_id)`, not `uav_id` directly — see fleet_registry.py for
+    why UAV-01 reuses the pre-existing "primary" engine_lifecycle row."""
+    sim = _entry(request, uav_id).sim
     if getattr(sim, "active_mission_id", None) is not None:
         raise HTTPException(
             409, f"mission {sim.active_mission_id} is already recording"
         )
-    mission_id = repository.start_mission(req.profile_name, req.notes)
+    mission_id = repository.start_mission(req.profile_name, req.notes, uav_id=uav_id)
     sim.active_mission_id = mission_id
 
     seeded_wear_state = None
     if hasattr(sim, "seed_fault_state_from_wear"):
-        lifecycle = lifecycle_repository.get_current_lifecycle()
+        lifecycle = lifecycle_repository.get_current_lifecycle(
+            engine_id=lifecycle_engine_id(uav_id)
+        )
         seeded_wear_state = sim.seed_fault_state_from_wear(
             lifecycle["current_wear_state"]
         )
@@ -228,6 +270,7 @@ async def start_mission(req: MissionStartRequest, request: Request) -> dict:
 
     return {
         "ok": True,
+        "uav_id": uav_id,
         "mission_id": mission_id,
         "profile_name": req.profile_name,
         "seeded_wear_state": seeded_wear_state,
@@ -235,8 +278,8 @@ async def start_mission(req: MissionStartRequest, request: Request) -> dict:
 
 
 @router.post("/mission/end")
-async def end_mission(request: Request) -> dict:
-    sim = request.app.state.sim
+async def end_mission(request: Request, uav_id: str = DEFAULT_UAV_ID) -> dict:
+    sim = _entry(request, uav_id).sim
     mission_id = getattr(sim, "active_mission_id", None)
     if mission_id is None:
         raise HTTPException(409, "no mission is currently recording")
@@ -251,6 +294,7 @@ async def end_mission(request: Request) -> dict:
     report = build_mission_report(mission, frames, events)
     repository.end_mission(mission_id, report)
 
+    engine_id = lifecycle_engine_id(uav_id)
     lifecycle = None
     if hasattr(sim, "faults"):
         # Simulated seconds elapsed during this mission, from `sim_time_s` — not the
@@ -262,10 +306,12 @@ async def end_mission(request: Request) -> dict:
         # though the physics really did run that long in simulated time.
         elapsed_sim_s = sim.sim_time_s - getattr(sim, "mission_start_sim_time_s", sim.sim_time_s)
         duration_hours = max(0.0, elapsed_sim_s) / 3600.0
-        lifecycle = lifecycle_repository.increment_operating_hours(duration_hours)
+        lifecycle = lifecycle_repository.increment_operating_hours(
+            duration_hours, engine_id=engine_id
+        )
 
         final_wear = sim.faults.snapshot()
-        lifecycle = lifecycle_repository.set_wear_state(final_wear)
+        lifecycle = lifecycle_repository.set_wear_state(final_wear, engine_id=engine_id)
 
         # A fault counts as "active during the mission" if it either fired during this
         # mission's own telemetry (a real, non-sensor FaultEvent row — the operator
@@ -285,7 +331,9 @@ async def end_mission(request: Request) -> dict:
             if severity > 1e-4
         }
         for fault_type in active_from_events | active_from_seed:
-            lifecycle = lifecycle_repository.record_fault_event(fault_type)
+            lifecycle = lifecycle_repository.record_fault_event(
+                fault_type, engine_id=engine_id
+            )
 
         sim.mission_seed_wear_state = {}
 
@@ -293,8 +341,8 @@ async def end_mission(request: Request) -> dict:
 
 
 @router.get("/mission/status")
-async def mission_status(request: Request) -> dict:
-    sim = request.app.state.sim
+async def mission_status(request: Request, uav_id: str = DEFAULT_UAV_ID) -> dict:
+    sim = _entry(request, uav_id).sim
     mission_id = getattr(sim, "active_mission_id", None)
     return {
         "recording": mission_id is not None,
@@ -304,8 +352,8 @@ async def mission_status(request: Request) -> dict:
 
 
 @router.get("/missions")
-async def list_missions() -> dict:
-    return {"missions": repository.list_missions()}
+async def list_missions(uav_id: str | None = None) -> dict:
+    return {"missions": repository.list_missions(uav_id=uav_id)}
 
 
 @router.get("/missions/{mission_id}/report")
@@ -330,17 +378,20 @@ async def get_mission_report(mission_id: int) -> dict:
 
 
 @router.post("/replay/start")
-async def start_replay(req: ReplayStartRequest, request: Request) -> dict:
+async def start_replay(
+    req: ReplayStartRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
     from app.api import ws_telemetry
 
     frames = repository.get_mission_frames(req.mission_id)
     if not frames:
         raise HTTPException(404, f"mission {req.mission_id} has no recorded frames")
 
-    result = await replay_engine.start(
+    entry = _entry(request, uav_id)
+    result = await entry.replay_engine.start(
         req.mission_id,
         req.speed_factor,
-        ws_telemetry.manager.broadcast_json,
+        lambda payload: ws_telemetry.manager.broadcast_to_uav(uav_id, payload),
         frames,
     )
     if not result.get("ok"):
@@ -349,8 +400,8 @@ async def start_replay(req: ReplayStartRequest, request: Request) -> dict:
 
 
 @router.post("/replay/stop")
-async def stop_replay() -> dict:
-    return await replay_engine.stop()
+async def stop_replay(request: Request, uav_id: str = DEFAULT_UAV_ID) -> dict:
+    return await _entry(request, uav_id).replay_engine.stop()
 
 
 # ---- Phase 4: operating setpoint and mission presets -------------------------
@@ -358,14 +409,14 @@ async def stop_replay() -> dict:
 
 @router.post("/setpoint")
 async def set_operating_setpoint(
-    req: OperatingSetpointRequest, request: Request
+    req: OperatingSetpointRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
 ) -> dict:
     """Command throttle, mixture trim and/or injection-timing trim on the live engine.
 
     This is the existing manual-throttle override widened to the two levers Phase 2 kept
     internal. Omitted fields are left alone, so the mixture can be trimmed without
     disturbing the throttle."""
-    sim = request.app.state.sim
+    sim = _entry(request, uav_id).sim
     if not hasattr(sim, "set_operating_setpoint"):
         raise HTTPException(400, "requires the physics backend (USE_MOCK=false)")
     if (
@@ -383,17 +434,19 @@ async def set_operating_setpoint(
 
 
 @router.get("/setpoint")
-async def get_operating_setpoint(request: Request) -> dict:
-    sim = request.app.state.sim
+async def get_operating_setpoint(request: Request, uav_id: str = DEFAULT_UAV_ID) -> dict:
+    sim = _entry(request, uav_id).sim
     if not hasattr(sim, "operating_setpoint"):
         raise HTTPException(400, "requires the physics backend")
     return {"setpoint": sim.operating_setpoint()}
 
 
 @router.post("/setpoint/reset")
-async def reset_operating_setpoint(request: Request) -> dict:
+async def reset_operating_setpoint(
+    request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
     """Return mixture and timing to their scheduled values, leaving throttle alone."""
-    sim = request.app.state.sim
+    sim = _entry(request, uav_id).sim
     if not hasattr(sim, "reset_trims"):
         raise HTTPException(400, "requires the physics backend")
     return {"ok": True, "setpoint": sim.reset_trims()}
@@ -412,9 +465,11 @@ async def list_presets() -> dict:
 
 
 @router.post("/apply-preset")
-async def apply_preset(req: ApplyPresetRequest, request: Request) -> dict:
+async def apply_preset(
+    req: ApplyPresetRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+) -> dict:
     """Feed a preset's setpoint into the live simulation's manual-override mechanism."""
-    sim = request.app.state.sim
+    sim = _entry(request, uav_id).sim
     if not hasattr(sim, "set_operating_setpoint"):
         raise HTTPException(400, "requires the physics backend (USE_MOCK=false)")
 
@@ -438,5 +493,5 @@ async def apply_preset(req: ApplyPresetRequest, request: Request) -> dict:
 
 
 @router.get("/replay/status")
-async def replay_status() -> dict:
-    return replay_engine.status
+async def replay_status(request: Request, uav_id: str = DEFAULT_UAV_ID) -> dict:
+    return _entry(request, uav_id).replay_engine.status

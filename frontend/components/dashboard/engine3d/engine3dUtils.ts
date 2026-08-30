@@ -348,3 +348,76 @@ export function firingPulse(
   }
   return { flash, skipped: false };
 }
+
+// ---------------------------------------------------------------------------
+// Part inspector — selection visuals
+// ---------------------------------------------------------------------------
+
+/**
+ * How a part should render given the current selection.
+ *
+ * `"normal"` is the default when nothing is selected: every part keeps exactly the
+ * appearance it had before the inspector existed.
+ */
+export type PartVisual = "normal" | "selected" | "dimmed";
+
+/** Opacity that un-selected parts drop to — ghosted, but never hidden or unmounted. */
+export const DIM_OPACITY = 0.28;
+
+export function visualFor(selectedPartId: string | null, partId: string): PartVisual {
+  if (!selectedPartId) return "normal";
+  return selectedPartId === partId ? "selected" : "dimmed";
+}
+
+/**
+ * Resolve a mesh's `transparent` / `opacity` props for the current selection state.
+ *
+ * Deliberately touches nothing but those two props. Every telemetry binding in this
+ * scene writes `color`, `emissive` or `emissiveIntensity` from inside `useFrame`, and
+ * none of them writes opacity — so ghosting a part cannot fight its live colour. A
+ * red-hot cylinder that has been dimmed still blends its own emissive red at 28%: it
+ * reads as dimmed-but-clearly-still-red rather than as grey.
+ *
+ * @param baseOpacity  what the part renders at normally (some parts, like the intake
+ *                     plenum log, are already partly translucent).
+ * @param xrayOpacity  what the part renders at in Flow Diagram mode.
+ */
+export function partMaterial(
+  visual: PartVisual,
+  xray: boolean,
+  xrayOpacity: number,
+  baseOpacity = 1
+): { transparent: boolean; opacity: number } {
+  const base = xray ? xrayOpacity : baseOpacity;
+  if (visual === "dimmed") {
+    // Opaque parts drop to the ghost level. Parts that are *already* translucent — flow
+    // tubes, the plenum log — are scaled down instead, because clamping them to 0.28
+    // would make them more visible when dimmed than they were to begin with.
+    const dimmed = base <= DIM_OPACITY ? base * 0.55 : DIM_OPACITY;
+    return { transparent: true, opacity: dimmed };
+  }
+  return { transparent: xray || base < 1, opacity: base };
+}
+
+/** Flow-arrow emphasis, ghosted the same way solid geometry is. */
+export function partEmphasis(visual: PartVisual, emphasis: number): number {
+  return visual === "dimmed" ? emphasis * 0.22 : emphasis;
+}
+
+/**
+ * `onUpdate` handler for every material whose `transparent` flag we toggle.
+ *
+ * three.js bakes `#define OPAQUE` into a material's compiled program whenever
+ * `transparent === false`, and that define forces `diffuseColor.a = 1.0` in the fragment
+ * shader. Flipping `transparent` to true later therefore has **no visible effect** —
+ * `opacity` is a uniform the shader has been compiled to ignore — until the program is
+ * re-derived, which only happens when `needsUpdate` is set. react-three-fiber does not
+ * set it when it writes changed props, so each such material asks for it here.
+ *
+ * `opaque` is part of three's program cache key, so the re-derived program comes out of
+ * the cache: this costs a cache lookup when the selection changes, not a shader compile,
+ * and it never runs on the per-frame path.
+ */
+export function refreshMaterial(material: THREE.Material): void {
+  material.needsUpdate = true;
+}

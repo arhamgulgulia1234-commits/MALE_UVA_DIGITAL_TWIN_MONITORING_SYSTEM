@@ -8,6 +8,7 @@
  * conditions fell outside modelled validity. Losing that would leave the panel silently
  * empty with no way to tell a rejected request from a slow one.
  */
+import { useFleetStore } from "../fleet/store";
 import type {
   LiveOperatingPoint,
   OperatingPointResult,
@@ -91,6 +92,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** The what-if scenario endpoints below (`runScenario`, `fetchEnvelope`, the scenario
+ * history) are deliberately NOT scoped to a UAV — a Test Bench run takes its starting
+ * wear from `initial_fault_severities` in the request body, never from a live engine,
+ * so it is the same computation regardless of which UAV happens to be selected. Only
+ * the handful of calls below that actually read or command a *live* engine (the
+ * optimizer's `use_current_engine_health`, applying a preset, mission status, and the
+ * live map marker) need `uav_id`. */
+function withUav(path: string): string {
+  const uavId = useFleetStore.getState().selectedUavId;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}uav_id=${encodeURIComponent(uavId)}`;
+}
+
 export function runScenario(body: ScenarioRequest): Promise<ScenarioResult> {
   return request<ScenarioResult>("/simulate/scenario", {
     method: "POST",
@@ -116,7 +130,7 @@ export function optimizeOperatingPoint(body: {
   objective: OptimizerObjective;
   use_current_engine_health: boolean;
 }): Promise<OperatingPointResult> {
-  return request<OperatingPointResult>("/optimize/operating-point", {
+  return request<OperatingPointResult>(withUav("/optimize/operating-point"), {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -131,7 +145,7 @@ export function applyPreset(presetName: string): Promise<{
   preset_name: string;
   setpoint: Record<string, number | null>;
 }> {
-  return request("/control/apply-preset", {
+  return request(withUav("/control/apply-preset"), {
     method: "POST",
     body: JSON.stringify({ preset_name: presetName }),
   });
@@ -142,7 +156,7 @@ export function fetchMissionStatus(): Promise<{
   mission_id: number | null;
   frames_recorded: number;
 }> {
-  return request("/control/mission/status");
+  return request(withUav("/control/mission/status"));
 }
 
 // ---- performance maps ---------------------------------------------------------
@@ -167,5 +181,5 @@ export function fetchPerformanceMap(params: {
  * point as a normal state rather than an error to surface.
  */
 export function fetchLiveOperatingPoint(): Promise<LiveOperatingPoint> {
-  return request<LiveOperatingPoint>("/performance-maps/live-point");
+  return request<LiveOperatingPoint>(withUav("/performance-maps/live-point"));
 }
