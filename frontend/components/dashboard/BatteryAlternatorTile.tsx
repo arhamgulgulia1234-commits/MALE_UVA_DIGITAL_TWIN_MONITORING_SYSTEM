@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { Sparkline } from "@/components/charts/Sparkline";
 import { useTelemetryStore } from "@/lib/store";
+import { useTweenedNumber } from "@/hooks/useTweenedNumber";
 import { HEALTHY_BANDS } from "@/lib/types";
 import { bandStatus, type BandStatus } from "@/lib/format";
 
@@ -38,6 +39,7 @@ export function BatteryAlternatorTile() {
 
   const battery = latest?.battery_voltage_v ?? null;
   const alternator = latest?.alternator_output_v ?? null;
+  const smoothedBattery = useTweenedNumber(battery ?? 0);
 
   const series = buffer
     .slice(-SPARK_WINDOW)
@@ -52,18 +54,18 @@ export function BatteryAlternatorTile() {
   return (
     <div
       className={clsx(
-        "glass-panel flex flex-col gap-1.5 border p-3 transition-shadow duration-500",
+        "glass-panel flex flex-col gap-2 border p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-shadow duration-500",
         toneBorder[status]
       )}
     >
       <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wider text-slate-500">
+        <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">
           Bus Voltage
         </span>
         {battery != null && (
           <span
             className={clsx(
-              "text-[9px] uppercase tracking-wide",
+              "text-[9px] font-medium uppercase tracking-wide",
               charging ? "text-status-go" : "text-status-amber"
             )}
           >
@@ -73,8 +75,8 @@ export function BatteryAlternatorTile() {
       </div>
 
       <div className="flex items-baseline gap-1">
-        <span className={clsx("tabular text-xl font-semibold", toneText[status])}>
-          {battery != null ? battery.toFixed(1) : "—"}
+        <span className={clsx("tabular text-2xl font-semibold leading-none", toneText[status])}>
+          {battery != null ? smoothedBattery.toFixed(1) : "—"}
         </span>
         <span className="text-[10px] text-slate-500">V</span>
         {alternator != null && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 interface BarSpectrumProps {
   data: { label: string; value: number; tone: "normal" | "warn" | "critical" }[];
@@ -18,7 +18,8 @@ export function BarSpectrum({ data, height = 180, maxValue }: BarSpectrumProps) 
   return (
     <div style={{ height, width: "100%" }}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+        <BarChart data={data} margin={{ top: 20, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke="#1e2734" strokeDasharray="3 3" vertical={false} />
           <XAxis
             dataKey="label"
             tick={{ fill: "#5b6b82", fontSize: 10, fontFamily: "var(--font-mono)" }}
@@ -46,6 +47,12 @@ export function BarSpectrum({ data, height = 180, maxValue }: BarSpectrumProps) 
             {data.map((d, i) => (
               <Cell key={i} fill={toneColor[d.tone]} />
             ))}
+            <LabelList
+              dataKey="value"
+              position="top"
+              formatter={(v: number) => v.toFixed(2)}
+              style={{ fontFamily: "var(--font-mono)", fontSize: 10, fill: "#8b98ab" }}
+            />
           </Bar>
         </BarChart>
       </ResponsiveContainer>

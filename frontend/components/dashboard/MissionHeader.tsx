@@ -10,6 +10,7 @@ import { EMBLEM_PATH, PRODUCT_NAME, TAGLINE } from "@/lib/branding";
 import type { ConnectionStatus } from "@/lib/websocket";
 import { formatClock } from "@/lib/format";
 import type { MissionPhase, Recommendation, RecoveryRecommendation } from "@/lib/types";
+import { HouseIcon, PlayIcon, WarningTriangleIcon } from "./icons";
 
 const PHASE_LABEL: Record<MissionPhase, string> = {
   climb: "Climb",
@@ -55,7 +56,15 @@ const RECOMMENDATION_STYLE: Record<
  */
 const RECOVERY_STYLE: Record<
   RecoveryRecommendation,
-  { bg: string; border: string; text: string; glow: string; pulse: boolean; icon: string; ring: string }
+  {
+    bg: string;
+    border: string;
+    text: string;
+    glow: string;
+    pulse: boolean;
+    icon: typeof HouseIcon;
+    ring: string;
+  }
 > = {
   "RTB-SAFE": {
     bg: "bg-status-go/10",
@@ -63,7 +72,7 @@ const RECOVERY_STYLE: Record<
     text: "text-status-go",
     glow: "shadow-glow-go",
     pulse: false,
-    icon: "⌂",
+    icon: HouseIcon,
     ring: "",
   },
   "RTB-CAUTION": {
@@ -72,7 +81,7 @@ const RECOVERY_STYLE: Record<
     text: "text-status-amber",
     glow: "shadow-glow-amber",
     pulse: true,
-    icon: "⌂",
+    icon: HouseIcon,
     ring: "",
   },
   "RTB-AT-RISK": {
@@ -81,7 +90,7 @@ const RECOVERY_STYLE: Record<
     text: "text-status-red",
     glow: "shadow-glow-red",
     pulse: true,
-    icon: "⚠",
+    icon: WarningTriangleIcon,
     ring: "ring-2 ring-status-red/60 ring-offset-2 ring-offset-base-bg",
   },
 };
@@ -123,9 +132,9 @@ export function MissionHeader() {
             className="h-9 w-9 shrink-0"
           />
           <div>
-            <h1 className="flex items-baseline gap-2 font-display text-base font-bold tracking-wide text-slate-100 sm:text-lg">
+            <h1 className="flex items-baseline gap-2 font-display text-lg font-bold tracking-wide text-slate-100 sm:text-xl">
               {PRODUCT_NAME}
-              <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-brand-gold sm:text-[11px]">
+              <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-brand-gold sm:text-[11px]">
                 {TAGLINE}
               </span>
             </h1>
@@ -138,7 +147,7 @@ export function MissionHeader() {
             engine. Living in the header rather than each page means switching UAVs
             once follows the operator to every view instead of resetting per page. */}
         <label className="flex items-center gap-1.5 text-[11px]">
-          <span className="uppercase tracking-wider text-slate-500">UAV</span>
+          <span className="font-medium uppercase tracking-[0.14em] text-slate-500">UAV</span>
           <select
             value={selectedUavId}
             onChange={(e) => setSelectedUavId(e.target.value)}
@@ -154,20 +163,27 @@ export function MissionHeader() {
 
         <div className="ml-auto flex items-center gap-4 sm:gap-6">
           <div className="hidden flex-col items-end sm:flex">
-            <span className="text-[10px] uppercase tracking-wider text-slate-500">Mission Clock</span>
-            <span className="tabular text-lg font-medium text-slate-200">{formatClock(elapsedS)}</span>
+            <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">
+              Mission Clock
+            </span>
+            <span className="tabular text-lg font-medium leading-tight text-slate-200">
+              {formatClock(elapsedS)}
+            </span>
           </div>
 
           <div className="hidden flex-col items-end md:flex">
-            <span className="text-[10px] uppercase tracking-wider text-slate-500">Phase</span>
-            <span className="font-display text-lg font-semibold text-status-cyan">
+            <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">
+              Phase
+            </span>
+            <span className="font-display text-lg font-semibold leading-tight text-status-cyan">
               {latest ? PHASE_LABEL[latest.mission_phase] : "—"}
             </span>
           </div>
 
           {isReplay && (
-            <span className="animate-pulseGlow rounded-md border border-status-amber/50 bg-status-amber/15 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.15em] text-status-amber">
-              ⏵ Replay{latest?.replay_mission_id ? ` #${latest.replay_mission_id}` : ""}
+            <span className="flex animate-pulseGlow items-center gap-1.5 rounded-md border border-status-amber/50 bg-status-amber/15 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.15em] text-status-amber">
+              <PlayIcon className="h-2.5 w-2.5" />
+              Replay{latest?.replay_mission_id ? ` #${latest.replay_mission_id}` : ""}
             </span>
           )}
 
@@ -220,7 +236,7 @@ export function MissionHeader() {
               )}
               title="Recovery reliability — can it safely get back to base if we abort right now?"
             >
-              <span aria-hidden="true">{recoveryStyle.icon}</span>
+              <recoveryStyle.icon className="h-3.5 w-3.5 shrink-0" />
               {recoveryRecommendation}
             </motion.div>
           </AnimatePresence>

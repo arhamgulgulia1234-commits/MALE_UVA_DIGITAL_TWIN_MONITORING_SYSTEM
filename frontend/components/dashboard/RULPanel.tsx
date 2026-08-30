@@ -25,9 +25,11 @@ export function RULPanel() {
     <GlassCard title="Remaining Useful Life" glow={tone.glow} className="h-full">
       <div className="flex h-full flex-col justify-between gap-3">
         <div className="flex items-baseline gap-2">
-          <span className={`tabular text-4xl font-bold ${tone.text}`}>{formatRul(rul)}</span>
+          <span className={`tabular text-4xl font-bold leading-none ${tone.text}`}>
+            {formatRul(rul)}
+          </span>
         </div>
-        <p className="text-[11px] text-slate-500">
+        <p className="text-[11px] leading-relaxed text-slate-500">
           {rul === null
             ? "No active degradation — RUL estimate suppressed while nominal."
             : "Estimated time to subsystem limit at current fault severity trend."}

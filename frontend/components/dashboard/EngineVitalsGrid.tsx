@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { Sparkline } from "@/components/charts/Sparkline";
 import { BatteryAlternatorTile } from "./BatteryAlternatorTile";
 import { useTelemetryStore } from "@/lib/store";
+import { useTweenedNumber } from "@/hooks/useTweenedNumber";
 import { HEALTHY_BANDS, type TelemetryFrame } from "@/lib/types";
 import { bandStatus, type BandStatus } from "@/lib/format";
 
@@ -88,21 +89,24 @@ function VitalTile({ def }: { def: VitalDef }) {
   const slice = buffer.slice(-SPARK_WINDOW);
   const series = slice.map(def.extract);
   const current = latest ? def.extract(latest) : 0;
+  const smoothed = useTweenedNumber(current);
   const status: BandStatus = def.band ? bandStatus(current, def.band) : "normal";
 
   return (
     <div
       className={clsx(
-        "glass-panel flex flex-col gap-1.5 border p-3 transition-shadow duration-500",
+        "glass-panel flex flex-col gap-2 border p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-shadow duration-500",
         toneBorder[status]
       )}
     >
       <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wider text-slate-500">{def.label}</span>
+        <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">
+          {def.label}
+        </span>
       </div>
       <div className="flex items-baseline gap-1">
-        <span className={clsx("tabular text-xl font-semibold", toneText[status])}>
-          {current.toFixed(def.decimals)}
+        <span className={clsx("tabular text-2xl font-semibold leading-none", toneText[status])}>
+          {smoothed.toFixed(def.decimals)}
         </span>
         <span className="text-[10px] text-slate-500">{def.unit}</span>
       </div>
@@ -114,7 +118,7 @@ function VitalTile({ def }: { def: VitalDef }) {
 export function EngineVitalsGrid() {
   return (
     <section>
-      <h2 className="panel-title mb-2 px-1">Engine Vitals</h2>
+      <h2 className="panel-title mb-2.5 px-1">Engine Vitals</h2>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {VITALS.map((def) => (
           <VitalTile key={def.key} def={def} />
