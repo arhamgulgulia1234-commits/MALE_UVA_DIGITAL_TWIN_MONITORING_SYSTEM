@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import clsx from "clsx";
+import gsap from "gsap";
 import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useTelemetryStore } from "@/lib/store";
@@ -17,11 +18,19 @@ interface FeedEntry {
   timestamp: number;
 }
 
-function severityTone(s: number): "caution" | "nogo" | "cyan" {
+type Tone = "caution" | "nogo" | "cyan";
+
+function severityTone(s: number): Tone {
   if (s >= 0.7) return "nogo";
   if (s >= 0.35) return "caution";
   return "cyan";
 }
+
+const TONE_HEX: Record<Tone, string> = {
+  nogo: "#ef4a5f",
+  caution: "#f5a623",
+  cyan: "#3fd0e0",
+};
 
 /**
  * The fused-channel sensor faults' badge line — the quantitative innovation that
@@ -51,6 +60,94 @@ function fusionInnovationLabel(type: string, latest: TelemetryFrame | null): str
     default:
       return null;
   }
+}
+
+interface FeedItemProps {
+  entry: FeedEntry;
+  meta: { label: string; description: string } | undefined;
+  tone: Tone;
+  displaySeverity: number;
+  detail: string | null;
+}
+
+/**
+ * A newly-detected fault gets a brief GSAP glow flash on top of framer-motion's
+ * existing enter animation (opacity/height/y) — an attention pulse distinct from an
+ * ordinary list insertion, decaying over ~900ms. Cleared entries and the initial
+ * mount/reduced-motion path skip it; the border/background stay in their resting tone.
+ */
+function useDetectionFlash(shouldFlash: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!shouldFlash || !ref.current) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) return;
+    const tween = gsap.fromTo(
+      ref.current,
+      { opacity: 0.6 },
+      { opacity: 0, duration: 0.9, ease: "power2.out" }
+    );
+    return () => {
+      tween.kill();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return ref;
+}
+
+function FeedItem({ entry, meta, tone, displaySeverity, detail }: FeedItemProps) {
+  const shouldFlash = entry.event === "detected" && tone !== "cyan";
+  const flashRef = useDetectionFlash(shouldFlash);
+
+  return (
+    <motion.li
+      layout
+      initial={{ opacity: 0, y: -14, height: 0 }}
+      animate={{ opacity: 1, y: 0, height: "auto" }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.28, ease: "easeOut" }}
+      className={clsx(
+        "relative flex items-center gap-3 overflow-hidden rounded-lg border px-3 py-2 text-xs",
+        tone === "nogo" && "border-status-red/40 bg-status-red/10",
+        tone === "caution" && "border-status-amber/40 bg-status-amber/10",
+        tone === "cyan" && "border-base-border bg-base-panel2/60"
+      )}
+    >
+      {shouldFlash && (
+        <div
+          ref={flashRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-lg"
+          style={{ boxShadow: `inset 0 0 0 1px ${TONE_HEX[tone]}, 0 0 18px 1px ${TONE_HEX[tone]}66` }}
+        />
+      )}
+      <span
+        className={clsx("h-2 w-2 shrink-0 rounded-full", {
+          "bg-status-red": tone === "nogo",
+          "bg-status-amber": tone === "caution",
+          "bg-status-cyan": tone === "cyan",
+        })}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="truncate font-medium text-slate-200">{meta?.label ?? entry.type}</span>
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            {entry.event === "cleared" ? "cleared" : "detected"}
+          </span>
+        </div>
+        <p className="truncate text-[11px] text-slate-500">{meta?.description}</p>
+        {detail && <p className="truncate text-[10px] text-status-cyan">{detail}</p>}
+      </div>
+      <div className="shrink-0 text-right">
+        {entry.event === "detected" && (
+          <span className="tabular text-sm font-semibold text-slate-100">
+            {Math.round(displaySeverity * 100)}%
+          </span>
+        )}
+        <p className="tabular text-[10px] text-slate-500">{formatTimeHHMMSS(entry.timestamp)}</p>
+      </div>
+    </motion.li>
+  );
 }
 
 export function FaultAlertFeed() {
@@ -113,55 +210,19 @@ export function FaultAlertFeed() {
               const liveSeverity =
                 entry.event === "detected" ? activeSeverityByType.get(entry.type) : undefined;
               const displaySeverity = liveSeverity ?? entry.severity;
-              const tone = entry.event === "cleared" ? "cyan" : severityTone(displaySeverity);
+              const tone: Tone = entry.event === "cleared" ? "cyan" : severityTone(displaySeverity);
+              const detail =
+                entry.event === "detected" ? fusionInnovationLabel(entry.type, latest) : null;
 
               return (
-                <motion.li
+                <FeedItem
                   key={entry.id}
-                  layout
-                  initial={{ opacity: 0, y: -14, height: 0 }}
-                  animate={{ opacity: 1, y: 0, height: "auto" }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.28, ease: "easeOut" }}
-                  className={clsx(
-                    "flex items-center gap-3 rounded-lg border px-3 py-2 text-xs",
-                    tone === "nogo" && "border-status-red/40 bg-status-red/10",
-                    tone === "caution" && "border-status-amber/40 bg-status-amber/10",
-                    tone === "cyan" && "border-base-border bg-base-panel2/60"
-                  )}
-                >
-                  <span
-                    className={clsx("h-2 w-2 shrink-0 rounded-full", {
-                      "bg-status-red": tone === "nogo",
-                      "bg-status-amber": tone === "caution",
-                      "bg-status-cyan": tone === "cyan",
-                    })}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-2">
-                      <span className="truncate font-medium text-slate-200">{meta?.label ?? entry.type}</span>
-                      <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                        {entry.event === "cleared" ? "cleared" : "detected"}
-                      </span>
-                    </div>
-                    <p className="truncate text-[11px] text-slate-500">{meta?.description}</p>
-                    {entry.event === "detected" &&
-                      (() => {
-                        const detail = fusionInnovationLabel(entry.type, latest);
-                        return detail ? (
-                          <p className="truncate text-[10px] text-status-cyan">{detail}</p>
-                        ) : null;
-                      })()}
-                  </div>
-                  <div className="shrink-0 text-right">
-                    {entry.event === "detected" && (
-                      <span className="tabular text-sm font-semibold text-slate-100">
-                        {Math.round(displaySeverity * 100)}%
-                      </span>
-                    )}
-                    <p className="tabular text-[10px] text-slate-500">{formatTimeHHMMSS(entry.timestamp)}</p>
-                  </div>
-                </motion.li>
+                  entry={entry}
+                  meta={meta}
+                  tone={tone}
+                  displaySeverity={displaySeverity}
+                  detail={detail}
+                />
               );
             })}
           </AnimatePresence>

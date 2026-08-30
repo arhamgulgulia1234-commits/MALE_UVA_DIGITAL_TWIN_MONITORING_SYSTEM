@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { useTelemetryStore } from "@/lib/store";
+import { useTweenedNumber } from "@/hooks/useTweenedNumber";
 import type { Recommendation } from "@/lib/types";
 
 // `mission_reliability` on the frame is the Weibull survival estimate from
@@ -27,18 +28,28 @@ export function MissionReliabilityCard() {
   const latest = useTelemetryStore((s) => s.latest);
   const rel = latest?.mission_reliability ?? { score: 1, recommendation: "GO" as Recommendation };
   const pct = Math.round(rel.score * 100);
+  const smoothedPct = useTweenedNumber(pct);
 
   return (
     <GlassCard title="Mission Reliability" glow="cyan" className="h-full">
       <div className="flex h-full flex-col justify-between gap-4">
         <div className="flex items-center justify-between">
-          <span className="tabular text-4xl font-bold text-slate-100">{pct}%</span>
+          <span className="tabular text-4xl font-bold leading-none text-slate-100">
+            {Math.round(smoothedPct)}%
+          </span>
           <StatusPill tone={TONE[rel.recommendation]} pulse={rel.recommendation !== "GO"}>
             {rel.recommendation}
           </StatusPill>
         </div>
 
-        <div className="h-2.5 w-full overflow-hidden rounded-full bg-base-border">
+        <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-base-border">
+          {[25, 50, 75].map((mark) => (
+            <span
+              key={mark}
+              className="absolute inset-y-0 z-10 w-px bg-base-bg/60"
+              style={{ left: `${mark}%` }}
+            />
+          ))}
           <motion.div
             className="h-full rounded-full"
             style={{ background: BAR_COLOR[rel.recommendation] }}

@@ -9,29 +9,30 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@react-three/drei": "^9.114.3",
+    "@react-three/fiber": "^8.17.10",
+    "clsx": "^2.1.1",
+    "d3-contour": "^4.0.2",
+    "framer-motion": "^11.11.9",
+    "gsap": "^3.15.0",
     "next": "14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "zustand": "^4.5.5",
-    "framer-motion": "^11.11.9",
     "recharts": "^2.12.7",
-    "d3-contour": "^4.0.2",
     "three": "^0.168.0",
-    "@react-three/fiber": "^8.17.10",
-    "@react-three/drei": "^9.114.3",
-    "clsx": "^2.1.1"
+    "zustand": "^4.5.5"
   },
   "devDependencies": {
-    "typescript": "^5.6.3",
-    "@types/node": "^20.16.11",
     "@types/d3-contour": "^3.0.6",
+    "@types/node": "^20.16.11",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
     "@types/three": "^0.168.0",
     "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "14.2.35",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
-    "eslint": "^8.57.1",
-    "eslint-config-next": "14.2.35"
+    "typescript": "^5.6.3"
   }
 }

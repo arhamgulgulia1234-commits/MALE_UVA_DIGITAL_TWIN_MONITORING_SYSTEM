@@ -49,17 +49,27 @@ export function TelemetryStrip() {
       glow="cyan"
       headerRight={
         <div className="flex flex-wrap gap-2">
-          {ALL_SERIES.map((s) => (
-            <button
-              key={s.key}
-              onClick={() => toggle(s.key)}
-              className="flex items-center gap-1.5 rounded-full border border-base-border px-2 py-0.5 text-[10px] transition-opacity"
-              style={{ opacity: hidden.has(s.key) ? 0.35 : 1 }}
-            >
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.color }} />
-              <span className="text-slate-400">{s.label}</span>
-            </button>
-          ))}
+          {ALL_SERIES.map((s) => {
+            const isHidden = hidden.has(s.key);
+            return (
+              <button
+                key={s.key}
+                onClick={() => toggle(s.key)}
+                aria-pressed={!isHidden}
+                className="flex items-center gap-1.5 rounded-full border border-base-border px-2.5 py-1 text-[10px] font-medium tracking-wide transition-all duration-200 hover:border-slate-500/60"
+                style={{ opacity: isHidden ? 0.35 : 1 }}
+              >
+                <span
+                  className="h-1.5 w-1.5 rounded-full transition-shadow duration-200"
+                  style={{
+                    background: s.color,
+                    boxShadow: isHidden ? "none" : `0 0 6px ${s.color}`,
+                  }}
+                />
+                <span className="text-slate-400">{s.label}</span>
+              </button>
+            );
+          })}
         </div>
       }
     >
