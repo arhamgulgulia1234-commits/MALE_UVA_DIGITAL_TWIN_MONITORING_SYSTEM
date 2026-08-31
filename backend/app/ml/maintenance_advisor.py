@@ -11,6 +11,22 @@ Urgency ladder:
     immediate      — RUL short, or a subsystem already critical. Land / abort.
     schedule_soon  — degrading but with time in hand. Book maintenance before next sortie.
     monitor        — early indication only. Watch it.
+
+---
+
+## Early warning: a specific action for a fluctuation, not a fault
+
+`generate_early_warning` is a distinct, additive tier ahead of `evaluate()` above — it is
+called once per subsystem currently gated `"emerging"`/`"building"` by
+`app.twin.residual_analysis.PreAlertMonitor`, and produces exactly one instruction, not a
+ranked list. `evaluate()`'s own `Advisory` objects are unchanged by anything in this
+section: an early warning and a regular advisory can both be present on the same frame for
+the same subsystem (the pre-alert layer typically fires before HI has moved far enough for
+`evaluate()`'s own `HI_WATCH` cut to notice it), and neither suppresses the other.
+
+The action text is deliberately concrete and subsystem-specific — "reduce throttle",
+"avoid further RPM increases" — rather than a generic "monitor closely", because the whole
+point of this tier is that there is still time to act on it.
 """
 from __future__ import annotations
 
@@ -51,6 +67,48 @@ class Advisory:
 
 
 _URGENCY_RANK = {"monitor": 0, "schedule_soon": 1, "immediate": 2}
+
+#: Concrete, in-flight actions for a subsystem showing an early fluctuation — distinct
+#: from `SUBSYSTEM_ACTIONS` above, which is post-flight ground-crew inspection language.
+#: These are things an operator can do *right now*, in the air, while there is still time.
+EARLY_WARNING_ACTIONS: dict[str, str] = {
+    "cylinder": "Ease off throttle and avoid rapid transients to reduce combustion loading.",
+    "lubrication": "Monitor oil pressure closely; avoid further RPM increases.",
+    "cooling": "Reduce throttle to roughly 70% to slow thermal buildup.",
+    "fuel": "Avoid aggressive throttle transients; watch EGT spread for a developing lean condition.",
+    "turbo": "Ease off high-boost demand; avoid sustained full-throttle climbs.",
+    "electrical": "Shed non-essential electrical load and monitor bus voltage.",
+}
+
+#: Below this many minutes-to-warning-threshold, the recommendation escalates to
+#: suggesting an early return rather than just the subsystem-specific mitigation.
+EARLY_WARNING_RTB_MIN = 20.0
+
+
+@dataclass
+class EarlyWarning:
+    """A NEW, earlier tier in front of `Advisory`/the hard fault-alert threshold — see the
+    module docstring. `predicted_minutes` is `None` whenever the underlying trend fit does
+    not have enough consistent samples yet (pre-alert's own gate can trip on fewer samples
+    than `RULPredictor.min_samples` requires) — `confidence` communicates that state
+    honestly rather than a stale or fabricated number filling the gap."""
+
+    subsystem: str
+    pre_alert_state: str  # "emerging" | "building"
+    predicted_minutes: float | None
+    confidence: str  # "low" | "medium" | "high"
+    recommended_action: str
+    basis: list[str]
+
+    def to_dict(self) -> dict:
+        return {
+            "subsystem": self.subsystem,
+            "pre_alert_state": self.pre_alert_state,
+            "predicted_minutes": self.predicted_minutes,
+            "confidence": self.confidence,
+            "recommended_action": self.recommended_action,
+            "basis": self.basis,
+        }
 
 
 class MaintenanceAdvisor:
@@ -186,3 +244,51 @@ class MaintenanceAdvisor:
             deduped.append(advisory)
 
         return deduped[: self.max_advisories]
+
+    def generate_early_warning(
+        self,
+        subsystem: str,
+        pre_alert_state: str,
+        predicted_minutes_to_warning_threshold: float | None,
+        confidence: str,
+    ) -> EarlyWarning:
+        """One concrete instruction for a subsystem currently gated into pre-alert.
+
+        `predicted_minutes_to_warning_threshold` and `confidence` are not folded into the
+        text of `recommended_action` — the frontend renders those two fields separately
+        (a distinct "~N min" / "confidence: low" readout) so the instruction itself stays
+        a single, short, actionable sentence regardless of whether a numeric ETA exists
+        yet.
+        """
+        base_action = EARLY_WARNING_ACTIONS.get(
+            subsystem, f"Monitor {subsystem} closely; avoid aggressive power changes."
+        )
+
+        basis = [f"{subsystem} pre-alert: {pre_alert_state}", f"confidence: {confidence}"]
+        if predicted_minutes_to_warning_threshold is not None:
+            basis.append(
+                f"trend-projected {predicted_minutes_to_warning_threshold:.0f} min to "
+                "warning threshold"
+            )
+        else:
+            basis.append("trend not yet fittable — too few consistent samples")
+
+        if (
+            predicted_minutes_to_warning_threshold is not None
+            and predicted_minutes_to_warning_threshold <= EARLY_WARNING_RTB_MIN
+        ):
+            recommended_action = (
+                f"{base_action} Consider early RTB within the next "
+                f"{predicted_minutes_to_warning_threshold:.0f} minutes."
+            )
+        else:
+            recommended_action = base_action
+
+        return EarlyWarning(
+            subsystem=subsystem,
+            pre_alert_state=pre_alert_state,
+            predicted_minutes=predicted_minutes_to_warning_threshold,
+            confidence=confidence,
+            recommended_action=recommended_action,
+            basis=basis,
+        )

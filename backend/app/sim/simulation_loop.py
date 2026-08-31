@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 
@@ -27,6 +28,7 @@ from app.core.models import (
     CHTSensorInnovations,
     ClassifierExplanation,
     CylinderReading,
+    EarlyWarning as EarlyWarningModel,
     HealthState,
     MaintenanceAdvisory,
     MissionReliability,
@@ -39,10 +41,10 @@ from app.fusion.cht_fusion import CHTFusion
 from app.fusion.fusion_monitor import FusionMonitor
 from app.fusion.oil_pressure_fusion import OilPressureFusion
 from app.fusion.rpm_fusion import RPMFusion
-from app.ml.anomaly_detector import AnomalyDetector, AnomalyReport
+from app.ml.anomaly_detector import AnomalyDetector, AnomalyReport, SUBSYSTEM_CHANNELS
 from app.ml.efficiency_analysis import EfficiencyAnalyser
 from app.ml.fault_classifier import Diagnosis, FaultClassifier
-from app.ml.maintenance_advisor import MaintenanceAdvisor
+from app.ml.maintenance_advisor import EarlyWarning, MaintenanceAdvisor
 from app.ml.mission_reliability import MissionReliabilityModel
 from app.ml.rul_predictor import RULPredictor
 from app.physics.environment import atmosphere
@@ -51,7 +53,7 @@ from app.physics.plant import EnginePlant
 from app.physics.sensor_fault_model import SensorFaultModel, SensorFaultState
 from app.sim.mission_profiles import MissionProfile, apply_scenario
 from app.twin.digital_twin import DigitalTwin
-from app.twin.residual_analysis import ResidualMonitor
+from app.twin.residual_analysis import PreAlertMonitor, ResidualMonitor, worst_level
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,15 @@ class DiagnosticSnapshot:
     #: "cht_sensor_secondary", "rpm_tachometer". None when no fused channel is
     #: implicated, or when the culprit cannot be narrowed past a general subsystem.
     suspect_sensor: str | None = None
+    # ---- Early warning: pre-alert tier ------------------------------------
+    #: Per-channel pre-alert level ("none"/"emerging"/"building"), diagnostic-only —
+    #: mirrors residual_z/residual_mean above. Never sent to the frontend; the
+    #: per-subsystem worst-of-channels view below and `TelemetryFrame.early_warnings` are
+    #: what the dashboard and the validation harness actually consume.
+    pre_alert_levels: dict[str, str] = field(default_factory=dict)
+    #: Per-subsystem worst-of-its-channels pre-alert level — what gates
+    #: `RULPredictor.update_early_warnings` and `MaintenanceAdvisor.generate_early_warning`.
+    subsystem_pre_alert_levels: dict[str, str] = field(default_factory=dict)
 
 
 class SimulationLoop:
@@ -114,6 +125,11 @@ class SimulationLoop:
         self.faults = FaultState()
 
         self.residuals = ResidualMonitor()
+        #: Early warning: reads the identical residual dict `self.residuals.update()`
+        #: receives every tick (see `tick()` below), so the two monitors can never
+        #: disagree about what the residual *was* that tick — only about how early to
+        #: react to it. See app/twin/residual_analysis.py's module docstring.
+        self.pre_alert = PreAlertMonitor()
         self.fusion_stats = FusionMonitor()
         self.anomaly = AnomalyDetector()
         self.rul = RULPredictor()
@@ -410,6 +426,11 @@ class SimulationLoop:
 
         comparison = self.twin.compare(real_state)
         report = self.residuals.update(comparison.residuals, dt_s=sim_dt_total)
+        # Early warning: the identical residual dict `self.residuals.update()` just
+        # consumed, handed to the earlier, softer pre-alert tier — see
+        # app/twin/residual_analysis.py. Deliberately computed alongside, not instead of,
+        # the existing z-score gate below; neither monitor's state feeds the other.
+        pre_alert_report = self.pre_alert.update(comparison.residuals, dt_s=sim_dt_total)
         anomaly: AnomalyReport = self.anomaly.update(report, dt_s=sim_dt_total)
         rul_estimate = self.rul.update(self.sim_time_s, anomaly.health_indicators)
         reliability = self.reliability.evaluate(
@@ -424,6 +445,20 @@ class SimulationLoop:
             current_health_indicators=anomaly.health_indicators,
             rul_estimate=rul_estimate,
             estimated_rtb_time_minutes=self.mission.estimated_rtb_seconds() / 60.0,
+        )
+
+        # Early warning: gate each subsystem on the worst pre-alert level among the
+        # channels that already feed its health score (SUBSYSTEM_CHANNELS — the identical
+        # mapping AnomalyDetector uses), then ask for a trend-projected ETA to the gentler
+        # warning threshold only for subsystems that gate passes.
+        subsystem_pre_alert_levels = {
+            subsystem: worst_level(
+                [pre_alert_report.level(channel) for channel, *_ in channels]
+            )
+            for subsystem, channels in SUBSYSTEM_CHANNELS.items()
+        }
+        warning_estimates = self.rul.update_early_warnings(
+            self.sim_time_s, subsystem_pre_alert_levels
         )
 
         residual_z = {c: report.z(c) for c in report.stats}
@@ -448,6 +483,27 @@ class SimulationLoop:
             combustion_instability_pct=real_state.combustion_instability_pct,
             predicted_source=diagnosis.predicted_source,
             battery_voltage_v=real_state.battery_voltage_v,
+        )
+
+        # Early warning: one concrete instruction per subsystem currently gated in.
+        # `evaluate()` above is untouched by this — an early warning and a regular
+        # advisory for the same subsystem can both be present on the same frame; this is
+        # an earlier, additive tier, not a replacement. "building" (both pre-alert tests
+        # firing) is listed ahead of "emerging", then by ascending predicted_minutes with
+        # an as-yet-unfittable trend (None) sorted last.
+        early_warnings: list[EarlyWarning] = [
+            self.advisor.generate_early_warning(
+                subsystem, level, warning_estimates[subsystem].predicted_minutes,
+                warning_estimates[subsystem].confidence,
+            )
+            for subsystem, level in subsystem_pre_alert_levels.items()
+            if level != "none"
+        ]
+        early_warnings.sort(
+            key=lambda w: (
+                0 if w.pre_alert_state == "building" else 1,
+                w.predicted_minutes if w.predicted_minutes is not None else math.inf,
+            )
         )
 
         self.diagnostics = DiagnosticSnapshot(
@@ -494,6 +550,8 @@ class SimulationLoop:
             },
             fusion_z=fusion_z,
             suspect_sensor=diagnosis.suspect_sensor,
+            pre_alert_levels={c: r.level for c, r in pre_alert_report.states.items()},
+            subsystem_pre_alert_levels=subsystem_pre_alert_levels,
         )
 
         # ---- assemble the frame (schema identical to Phase 1) ----------------
@@ -604,6 +662,19 @@ class SimulationLoop:
             fused_oil_pressure_kpa=round(oil_fusion_out.fused_oil_pressure_kpa, 1),
             oil_pressure_innovation=round(oil_fusion_out.innovation_kpa, 2),
             oil_pressure_kalman_gain=round(oil_fusion_out.kalman_gain, 4),
+            early_warnings=[
+                EarlyWarningModel(
+                    **{
+                        **w.to_dict(),
+                        "predicted_minutes": (
+                            round(w.predicted_minutes, 1)
+                            if w.predicted_minutes is not None
+                            else None
+                        ),
+                    }
+                )
+                for w in early_warnings
+            ],
         )
         self._latest = frame
         return frame

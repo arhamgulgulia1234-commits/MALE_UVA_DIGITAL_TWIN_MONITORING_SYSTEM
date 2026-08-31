@@ -37,6 +37,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.ml.anomaly_detector import SUBSYSTEM_CHANNELS  # noqa: E402
 from app.physics.fault_models import FAULT_TYPES  # noqa: E402
 from app.sim.simulation_loop import SimulationLoop  # noqa: E402
 
@@ -554,6 +555,197 @@ def plot_fusion(rec: dict) -> list[Path]:
     return [path]
 
 
+def run_early_warning_lead_time(
+    ramp_minutes: float,
+    fault_type: str = "bearing_wear",
+    subsystem: str = "lubrication",
+    severity: float = 0.85,
+    pre_inject_minutes: float = 4.0,
+    time_scale: float = 10.0,
+) -> dict:
+    """Real numbers for the early-warning lead-time claim, not an assumed figure.
+
+    Flies `fault_type` ramped in over `ramp_minutes`, and records the first tick each of
+    three events occurs:
+
+      * **pre-alert** — `subsystem` first appears in a frame's `early_warnings`
+        (`app.twin.residual_analysis.pre_alert_check`, gated at subsystem granularity —
+        see `SimulationLoop.tick`'s `subsystem_pre_alert_levels`).
+      * **hard alert** — the FIRST of `subsystem`'s own channels
+        (`SUBSYSTEM_CHANNELS[subsystem]`, the identical mapping `AnomalyDetector` uses)
+        crosses `ResidualMonitor`'s z-score gate (`sim.diagnostics.flagged_channels`) —
+        this is the existing hard fault-alert threshold, unchanged by this feature, and
+        what ultimately drives the classifier and `active_faults`/FaultAlertFeed.
+      * **NO-GO** — `frame.mission_reliability.recommendation` first reads `"NO-GO"`,
+        i.e. what the *existing* mission-reliability model would have reported with no
+        early-warning layer at all.
+
+    `pre_inject_minutes` must clear `PreAlertMonitor`'s own warmup (default 195 s — a full
+    baseline+recent window) with margin, or the pre-alert gate cannot fire at all in the
+    first seconds after injection regardless of how fast the fault develops — that would
+    measure the monitor's own startup, not the fault.
+    """
+    sim = SimulationLoop()
+    sim.set_time_scale(time_scale)
+
+    channels = [c for c, *_ in SUBSYSTEM_CHANNELS[subsystem]]
+    pre_inject_s = pre_inject_minutes * 60.0
+    ramp_s = ramp_minutes * 60.0
+    # Generous headroom past the ramp for a slow fault to actually cross NO-GO — a 15-min
+    # ramp needs far longer to play out than a 1-min one.
+    post_inject_s = (ramp_minutes + 25.0) * 60.0
+
+    pre_ticks = int(pre_inject_s / (TICK_S * time_scale))
+    post_ticks = int(post_inject_s / (TICK_S * time_scale))
+
+    rec: dict[str, list] = {
+        k: []
+        for k in (
+            "t_min", "oil_p", "hi", "reliability_rec", "severity",
+            "pre_alert_level", "predicted_minutes", "flagged",
+        )
+    }
+
+    for _ in range(pre_ticks):
+        sim.tick(TICK_S)
+    inject_sim_time_s = sim.sim_time_s
+
+    sim.inject_fault(fault_type, severity, ramp_s)
+
+    pre_alert_min: float | None = None
+    hard_alert_min: float | None = None
+    nogo_min: float | None = None
+
+    for _ in range(post_ticks):
+        frame = sim.tick(TICK_S)
+        t_min = (sim.sim_time_s - inject_sim_time_s) / 60.0
+
+        level = sim.diagnostics.subsystem_pre_alert_levels.get(subsystem, "none")
+        flagged = any(c in sim.diagnostics.flagged_channels for c in channels)
+        ew = next((w for w in frame.early_warnings if w.subsystem == subsystem), None)
+
+        if pre_alert_min is None and level != "none":
+            pre_alert_min = t_min
+        if hard_alert_min is None and flagged:
+            hard_alert_min = t_min
+        if nogo_min is None and frame.mission_reliability.recommendation == "NO-GO":
+            nogo_min = t_min
+
+        rec["t_min"].append(t_min)
+        rec["oil_p"].append(frame.oil_pressure_kpa)
+        rec["hi"].append(getattr(frame.health.subsystem_scores, subsystem))
+        rec["reliability_rec"].append(frame.mission_reliability.recommendation)
+        rec["severity"].append(sim.faults.severity(fault_type))
+        rec["pre_alert_level"].append(level)
+        rec["predicted_minutes"].append(ew.predicted_minutes if ew else None)
+        rec["flagged"].append(flagged)
+
+        # Once every event of interest has fired, there is nothing left to measure —
+        # stop early rather than burning CPU on the rest of a 25+ minute tail.
+        if pre_alert_min is not None and hard_alert_min is not None and nogo_min is not None:
+            break
+
+    lead_time_hard_min = (
+        None if pre_alert_min is None or hard_alert_min is None
+        else hard_alert_min - pre_alert_min
+    )
+    lead_time_nogo_min = (
+        None if pre_alert_min is None or nogo_min is None
+        else nogo_min - pre_alert_min
+    )
+
+    return {
+        "ramp_minutes": ramp_minutes,
+        "pre_alert_min": pre_alert_min,
+        "hard_alert_min": hard_alert_min,
+        "nogo_min": nogo_min,
+        "lead_time_hard_min": lead_time_hard_min,
+        "lead_time_nogo_min": lead_time_nogo_min,
+        "series": rec,
+    }
+
+
+def _fmt_min(x: float | None) -> str:
+    return "never observed" if x is None else f"{x:6.2f} min"
+
+
+def _report_lead_time(results: list[dict]) -> None:
+    print("\n--- early-warning lead time: bearing_wear at three ramp speeds ---")
+    print(f"{'ramp':>8s}  {'pre-alert':>14s}  {'hard-alert':>14s}  {'NO-GO':>14s}  "
+          f"{'lead vs hard':>14s}  {'lead vs NO-GO':>14s}")
+    for r in results:
+        print(
+            f"{r['ramp_minutes']:>6.0f} min  "
+            f"{_fmt_min(r['pre_alert_min']):>14s}  "
+            f"{_fmt_min(r['hard_alert_min']):>14s}  "
+            f"{_fmt_min(r['nogo_min']):>14s}  "
+            f"{_fmt_min(r['lead_time_hard_min']):>14s}  "
+            f"{_fmt_min(r['lead_time_nogo_min']):>14s}"
+        )
+
+    leads = [r["lead_time_hard_min"] for r in results if r["lead_time_hard_min"] is not None]
+    ramps = [r["ramp_minutes"] for r in results if r["lead_time_hard_min"] is not None]
+    if len(leads) >= 2:
+        increasing_with_ramp = all(
+            leads[i] <= leads[i + 1] + 1e-6 for i in range(len(leads) - 1)
+        )
+        print(
+            f"\n  lead time scales {'sensibly' if increasing_with_ramp else 'UNEXPECTEDLY'} "
+            f"with ramp speed (slower ramp -> {'more' if increasing_with_ramp else 'not more'} "
+            f"lead time): ramps {ramps} min -> leads {[round(l, 2) for l in leads]} min"
+        )
+
+
+def plot_early_warning_lead_time(results: list[dict]) -> list[Path]:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(len(results), 1, figsize=(11, 4 * len(results)), sharex=False)
+    if len(results) == 1:
+        axes = [axes]
+
+    for ax, r in zip(axes, results):
+        s = r["series"]
+        t = s["t_min"]
+        ax.plot(t, s["oil_p"], color=C_PRIMARY, lw=1.4, label="Oil pressure (kPa)")
+        ax.set_ylabel("kPa", fontsize=9)
+        ax2 = ax.twinx()
+        ax2.plot(t, s["severity"], color="#999", lw=1.0, ls=":", label="Injected severity")
+        ax2.set_ylim(-0.03, 1.03)
+        ax2.set_ylabel("severity", fontsize=8, color="#999")
+
+        if r["pre_alert_min"] is not None:
+            ax.axvline(r["pre_alert_min"], color="#f5a623", ls="--", lw=1.6,
+                       label=f"pre-alert (emerging) @ {r['pre_alert_min']:.2f} min")
+        if r["hard_alert_min"] is not None:
+            ax.axvline(r["hard_alert_min"], color=C_FAULT, ls="--", lw=1.6,
+                       label=f"hard alert (z-flagged) @ {r['hard_alert_min']:.2f} min")
+        if r["nogo_min"] is not None:
+            ax.axvline(r["nogo_min"], color="#7a1f2b", ls=":", lw=1.4,
+                       label=f"NO-GO @ {r['nogo_min']:.2f} min")
+
+        lead = r["lead_time_hard_min"]
+        lead_txt = "not observed" if lead is None else f"{lead:.2f} min"
+        ax.set_title(
+            f"bearing_wear ramped over {r['ramp_minutes']:.0f} min — "
+            f"lead time vs. hard alert: {lead_txt}",
+            fontsize=11, loc="left", fontweight="600",
+        )
+        ax.grid(alpha=0.25, linewidth=0.6)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.tick_params(labelsize=8)
+        ax.legend(fontsize=7.5, frameon=False, loc="upper right")
+
+    axes[-1].set_xlabel("minutes since fault injection", fontsize=9)
+    fig.suptitle(
+        "Early-warning lead time vs. the existing hard fault-alert threshold",
+        fontsize=13, fontweight="600",
+    )
+    fig.tight_layout()
+    path = OUTPUT_DIR / "10_early_warning_lead_time.png"
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+    return [path]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fault", default="bearing_wear", choices=list(FAULT_TYPES))
@@ -567,10 +759,13 @@ def main() -> None:
     parser.add_argument(
         "--scenario",
         default="fault",
-        choices=["fault", "throttle-transient", "fusion"],
+        choices=["fault", "throttle-transient", "fusion", "early-warning"],
         help="'fault' injects a fault mid-mission; 'throttle-transient' steps the "
              "throttle 20%%->100%%->20%% to check turbo and thermal lag; 'fusion' "
-             "injects a fault on only the secondary CHT probe to validate sensor fusion",
+             "injects a fault on only the secondary CHT probe to validate sensor fusion; "
+             "'early-warning' runs bearing_wear at three ramp speeds (1/5/15 min) and "
+             "reports the real pre-alert lead time ahead of the existing hard fault-alert "
+             "threshold and of mission_reliability going NO-GO",
     )
     args = parser.parse_args()
 
@@ -578,6 +773,18 @@ def main() -> None:
         logging.disable(logging.CRITICAL)
     else:
         logging.basicConfig(level=logging.WARNING)
+
+    if args.scenario == "early-warning":
+        print("Simulating bearing_wear ramped over 1, 5 and 15 minutes, measuring the "
+              "real early-warning lead time ahead of the existing hard fault-alert "
+              "threshold...")
+        results = [run_early_warning_lead_time(ramp_minutes=m) for m in (1.0, 5.0, 15.0)]
+        written = plot_early_warning_lead_time(results)
+        _report_lead_time(results)
+        print(f"\nWrote {len(written)} plots to {OUTPUT_DIR}/")
+        for path in written:
+            print(f"  {path.name}")
+        return
 
     if args.scenario == "throttle-transient":
         print("Simulating a rapid throttle transient: 20% -> 100% -> 20%…")

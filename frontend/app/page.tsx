@@ -10,6 +10,7 @@ import { EngineVitalsGrid } from "@/components/dashboard/EngineVitalsGrid";
 import { TelemetryStrip } from "@/components/dashboard/TelemetryStrip";
 import { VibrationSpectrum } from "@/components/dashboard/VibrationSpectrum";
 import { FaultAlertFeed } from "@/components/dashboard/FaultAlertFeed";
+import { EarlyWarningBanner } from "@/components/dashboard/EarlyWarningBanner";
 import { EfficiencyTrendChart } from "@/components/dashboard/EfficiencyTrendChart";
 import { MaintenanceAdvisoryPanel } from "@/components/dashboard/MaintenanceAdvisoryPanel";
 import { SensorFusionPanel } from "@/components/dashboard/SensorFusionPanel";
@@ -77,6 +78,12 @@ export default function Home() {
           <EfficiencyTrendChart />
           <VibrationSpectrum />
         </section>
+
+        {/* Early warning: a NEW, earlier tier sitting above the fault feed it precedes —
+            softer amber "watch" styling, distinct from FaultAlertFeed's red/amber
+            confirmed-alert treatment, so the two tiers can never be visually confused.
+            Renders nothing (returns null) once there is no active early warning. */}
+        <EarlyWarningBanner />
 
         {/* Phase 3: advisories sit beside the raw fault feed — one says what happened,
             the other says what to do about it. */}
