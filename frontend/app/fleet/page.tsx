@@ -14,15 +14,29 @@
  * socket, which keeps it simple and is plenty fresh for a roster view.
  */
 import { useEffect } from "react";
+import dynamic from "next/dynamic";
 import { ModeNav } from "@/components/nav/ModeNav";
 import { FleetSummaryHeader } from "@/components/fleet/FleetSummaryHeader";
 import { FleetRosterGrid } from "@/components/fleet/FleetRosterGrid";
 import { FleetTrendMiniCharts } from "@/components/fleet/FleetTrendMiniCharts";
 import { useFleetStore } from "@/lib/fleet/store";
 
+const FleetFormation3D = dynamic(
+  () => import("@/components/fleet/FleetFormation3D").then((m) => m.FleetFormation3D),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="glass-panel flex h-[340px] w-full items-center justify-center text-xs text-slate-500">
+        Loading fleet formation…
+      </div>
+    ),
+  }
+);
+
 export default function FleetPage() {
   const rankings = useFleetStore((s) => s.rankings);
   const rankingsLoading = useFleetStore((s) => s.rankingsLoading);
+  const fleetMissionReliability = useFleetStore((s) => s.fleetMissionReliability);
   const startPolling = useFleetStore((s) => s.startPolling);
 
   useEffect(() => {
@@ -58,6 +72,7 @@ export default function FleetPage() {
         ) : (
           <>
             <FleetSummaryHeader roster={rankings} />
+            <FleetFormation3D roster={rankings} fleetMissionReliability={fleetMissionReliability} />
             <FleetRosterGrid roster={rankings} />
             <FleetTrendMiniCharts />
           </>

@@ -13,8 +13,8 @@
  * as an independent slice rather than one merged store.
  */
 import { create } from "zustand";
-import { fetchFleetRankings } from "./api";
-import { DEFAULT_UAV_ID, type FleetOverviewEntry } from "./types";
+import { fetchFleetOverview, fetchFleetRankings } from "./api";
+import { DEFAULT_UAV_ID, type FleetMissionReliability, type FleetOverviewEntry } from "./types";
 
 interface FleetStore {
   selectedUavId: string;
@@ -24,7 +24,13 @@ interface FleetStore {
   rankingsLoading: boolean;
   lastLoadedAt: number | null;
 
+  /** GET /fleet/overview's joint-success read — polled alongside `rankings`, read by
+   * FleetFormation3D's header readout. Not derived from `rankings`: it needs each UAV's
+   * raw `mission_reliability.score`, which the roster rows don't carry. */
+  fleetMissionReliability: FleetMissionReliability | null;
+
   loadRankings: () => Promise<void>;
+  loadFleetMissionReliability: () => Promise<void>;
   startPolling: (intervalMs?: number) => () => void;
 }
 
@@ -35,6 +41,7 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
   rankings: [],
   rankingsLoading: false,
   lastLoadedAt: null,
+  fleetMissionReliability: null,
 
   loadRankings: async () => {
     set({ rankingsLoading: true });
@@ -46,12 +53,21 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
     });
   },
 
-  /** Poll /fleet/rankings on an interval. Returns a stop function — call it from the
-   * mounting component's effect cleanup. Safe to call more than once; each call owns
-   * its own timer. */
+  loadFleetMissionReliability: async () => {
+    const overview = await fetchFleetOverview();
+    if (overview) set({ fleetMissionReliability: overview.fleet_mission_reliability });
+  },
+
+  /** Poll /fleet/rankings (+ /fleet/overview for the joint-success read) on an interval.
+   * Returns a stop function — call it from the mounting component's effect cleanup. Safe
+   * to call more than once; each call owns its own timer. */
   startPolling: (intervalMs = 2000) => {
-    void get().loadRankings();
-    const id = setInterval(() => void get().loadRankings(), intervalMs);
+    const tick = () => {
+      void get().loadRankings();
+      void get().loadFleetMissionReliability();
+    };
+    tick();
+    const id = setInterval(tick, intervalMs);
     return () => clearInterval(id);
   },
 }));

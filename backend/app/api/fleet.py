@@ -90,10 +90,41 @@ def build_fleet_overview(fleet: FleetRegistry) -> list[dict[str, Any]]:
     return [_uav_snapshot(entry) for entry in fleet]
 
 
+def compute_fleet_mission_reliability(fleet: FleetRegistry) -> dict[str, Any]:
+    """Joint mission-success read across the whole squadron: the product of each UAV's
+    live `mission_reliability.score`, treated as independent (each is an independently
+    simulated engine). A UAV with no frame yet is excluded rather than assumed 1.0 or
+    0.0 — the fleet always has all three ticking from startup, so this is a startup-only
+    edge case, not a steady-state one."""
+    scores = {
+        entry.uav_id: frame.mission_reliability.score
+        for entry in fleet
+        if (frame := entry.sim.get_latest()) is not None
+    }
+    if not scores:
+        return {
+            "all_succeed_probability": None,
+            "weakest_uav_id": None,
+            "weakest_score": None,
+        }
+    all_succeed_probability = 1.0
+    for score in scores.values():
+        all_succeed_probability *= score
+    weakest_uav_id = min(scores, key=lambda k: scores[k])
+    return {
+        "all_succeed_probability": round(all_succeed_probability, 4),
+        "weakest_uav_id": weakest_uav_id,
+        "weakest_score": round(scores[weakest_uav_id], 4),
+    }
+
+
 @router.get("/overview")
-def get_fleet_overview(request: Request) -> list[dict[str, Any]]:
+def get_fleet_overview(request: Request) -> dict[str, Any]:
     fleet: FleetRegistry = request.app.state.fleet
-    return build_fleet_overview(fleet)
+    return {
+        "roster": build_fleet_overview(fleet),
+        "fleet_mission_reliability": compute_fleet_mission_reliability(fleet),
+    }
 
 
 @router.get("/rankings")
@@ -121,7 +152,10 @@ async def run_fleet_overview_broadcast(app) -> None:
             continue
         try:
             rankings = sorted(build_fleet_overview(fleet), key=_urgency_key)
+            fleet_mission_reliability = compute_fleet_mission_reliability(fleet)
         except Exception:
             logger.exception("Failed to build fleet overview for broadcast")
             continue
-        await ws_telemetry.fleet_manager.broadcast_json({"fleet": rankings})
+        await ws_telemetry.fleet_manager.broadcast_json(
+            {"fleet": rankings, "fleet_mission_reliability": fleet_mission_reliability}
+        )

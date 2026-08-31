@@ -5,7 +5,7 @@
  * and consumed by the fleet roster page, not by anything already using the testbench or
  * lifecycle stores.
  */
-import type { FleetOverviewEntry } from "./types";
+import type { FleetOverviewEntry, FleetOverviewResponse } from "./types";
 
 function resolveApiUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -35,8 +35,9 @@ async function getJson<T>(path: string): Promise<T | null> {
   }
 }
 
-export function fetchFleetOverview(): Promise<FleetOverviewEntry[] | null> {
-  return getJson<FleetOverviewEntry[]>("/fleet/overview");
+/** `{ roster, fleet_mission_reliability }` — the squadron-wide joint-success read. */
+export function fetchFleetOverview(): Promise<FleetOverviewResponse | null> {
+  return getJson<FleetOverviewResponse>("/fleet/overview");
 }
 
 /** Same rows as fetchFleetOverview, sorted most-urgent first. */
