@@ -591,6 +591,190 @@ to live inside a component: it owns a `ReconnectingSocket` across renders, so `u
 plain `useEffect` dependency there, tearing down the old UAV's socket and opening the newly
 selected one's.
 
+## Early Warning System (Phase 7)
+
+Every phase through 6 answers "is this now anomalous?" — `ResidualMonitor`'s z-score gate
+(`app/twin/residual_analysis.py`) is the system's **existing hard fault-alert threshold**:
+a channel is flagged when its residual has drifted more than `z_threshold` (3.0) standard
+deviations from its own recent noise, and that flag is what ultimately drives the anomaly
+detector, the fault classifier and `active_faults` — the field FaultAlertFeed renders.
+Phase 7 adds a second, deliberately softer and earlier tier **in front of** that gate,
+answering a different question: not "is this now anomalous" but "has this channel's
+*behaviour* started to change, even while its current value still looks unremarkable?"
+Nothing in this phase touches `ResidualMonitor`, the anomaly detector, the classifier, or
+`active_faults` — every existing hard-alert code path is unmodified, and
+`scripts/hardening_checks.py`'s 14/14 checks (including the twin-isolation and
+recovery-after-clear checks that most directly exercise that path) reproduce the identical
+numbers recorded before this phase.
+
+```
+                    ┌─────────────────────────────────────────┐
+                    │  app/twin/digital_twin.py                │
+                    │  residual = real[channel] - twin[channel]│
+                    └──────────────────┬────────────────────────┘
+                                       │  identical residual dict, every tick
+                    ┌──────────────────┴──────────────────────┐
+                    ▼                                          ▼
+   ┌─────────────────────────────────┐      ┌─────────────────────────────────────┐
+   │ ResidualMonitor (existing,       │      │ PreAlertMonitor (NEW)                 │
+   │ unmodified)                      │      │ app/twin/residual_analysis.py         │
+   │  EWMA mean/variance, z-score     │      │  per-channel rolling history,         │
+   │  flagged = z >= z_threshold      │      │  variance-ratio test + trend-slope    │
+   │  = the existing hard alert       │      │  test, each independently gated       │
+   └──────────────────┬────────────────┘      │  level = none / emerging / building   │
+                      │                        └──────────────────┬─────────────────────┘
+                      ▼                                            │ worst-of-subsystem-channels
+      classifier / active_faults / FaultAlertFeed                  ▼
+                                             ┌─────────────────────────────────────┐
+                                             │ RULPredictor.update_early_warnings    │
+                                             │ app/ml/rul_predictor.py               │
+                                             │ SAME trend fit as critical RUL,       │
+                                             │ target HI=75 not HI=40, gated on      │
+                                             │ pre-alert >= "emerging", SAME          │
+                                             │ asymmetric-EMA rate limiting          │
+                                             └──────────────────┬─────────────────────┘
+                                                                 ▼
+                                             ┌─────────────────────────────────────┐
+                                             │ MaintenanceAdvisor                    │
+                                             │  .generate_early_warning()            │
+                                             │ app/ml/maintenance_advisor.py         │
+                                             │ one concrete, subsystem-specific      │
+                                             │ instruction + basis                   │
+                                             └──────────────────┬─────────────────────┘
+                                                                 ▼
+                                             TelemetryFrame.early_warnings  (NEW, additive)
+                                                                 ▼
+                                             frontend/components/dashboard/
+                                             EarlyWarningBanner.tsx  (NEW)
+```
+
+### Two independent tests, and why each catches a different kind of onset
+
+`pre_alert_check` (a pure function over one channel's `(t, residual)` history) runs two
+statistically-gated tests that look for genuinely different shapes of onset, matching how
+differently this codebase's own faults actually announce themselves (see
+`docs/physics-model.md`'s fault table — some faults are smooth mean shifts, others add
+noise):
+
+* **Variance-ratio** — recent-window variance vs. an established baseline-window variance
+  immediately before it, both windows requiring a minimum sample count before the test is
+  even evaluated. Catches a fault whose real signature is *added noise* — `bearing_wear`'s
+  broadband vibration is the model's own example — before the *mean* has moved enough to
+  trip a z-score gate keyed on the mean.
+* **Trend-slope** — an OLS fit over the recent window, tested as a **t-statistic against
+  its own standard error** (so "significant" scales with how noisy the channel already is,
+  not a fixed slope in physical units), additionally required to be **sustained**: at
+  least 55% of the window's individual step-to-step deltas must share the fitted slope's
+  sign, which is what stops one large single-tick jump plus flat noise from reading as a
+  trend. Catches a fault whose signature is a smooth mean shift — `bearing_wear`'s own
+  effect on `oil_pressure_kpa` — long before the mean has moved the several sigma a
+  z-score gate requires.
+
+A channel is `emerging` when exactly one test fires, `building` when both do. A subsystem
+is gated in when the *worst* of its own channels (the identical `SUBSYSTEM_CHANNELS`
+mapping `AnomalyDetector` already uses) reaches at least `emerging` — the same granularity
+`MaintenanceAdvisor.generate_early_warning` and `TelemetryFrame.early_warnings` both
+operate at.
+
+**A bug caught by validating this, not by inspection.** The first working version had no
+explicit warm-up: three real and healthy-twin plants share an identical cold start, and the
+mission's own start-up transient (RPM ramping off idle, manifold filling) briefly perturbs
+the residual before the two plants settle into lockstep. With only a 10-sample minimum, the
+trend test tripped on that shared transient within the first few *seconds* of a healthy
+mission — a false positive with nothing to do with any fault. `PreAlertMonitor` now holds
+every channel at `none` until a full baseline-plus-recent window (195 s by default) has
+actually elapsed since the monitor was created, mirroring `ResidualMonitor`'s own
+`warmup_s` pattern. Verified: a healthy 400-simulated-second run (crossing the climb→cruise
+mission-phase boundary, itself a real transient the twin tracks identically) now produces
+zero non-`none` pre-alert levels on any of the six subsystems throughout.
+
+### Time-to-warning-threshold: the same trend fit, gated, rate-limited the same way
+
+`RULPredictor.update_early_warnings` deliberately does not duplicate the trend-fitting
+logic that already produces the critical RUL. It calls the identical `_estimate_for` — now
+parameterised with an optional target threshold — against a **gentler** line,
+`HI_WARNING_THRESHOLD = 75` (the critical RUL threshold stays `HI = 40`, unchanged), and
+only for subsystems the pre-alert gate above has already flagged; a subsystem still at
+`none` gets no estimate at all — "return null rather than guessing from noise", per the
+brief, rather than fitting a regression to what is still statistical noise.
+
+It also reuses this file's own fix for the RUL-jump bug (`docs/test-report.md`'s Fix 4):
+the identical asymmetric EMA — slow to rise (`smoothing_tau_s`, 20 s), fast to fall
+(`smoothing_tau_fall_s`, 3 s) — applied per-subsystem to the warning-threshold estimate.
+Without it, a warning ETA seeded high the instant a trend first becomes fittable would
+reproduce the exact "worse degradation reads as more time remaining" inversion that fix
+closed once already for the critical RUL.
+
+`confidence` (`low`/`medium`/`high`) is read off how much simulated-time *span* of
+consistent history the fit actually rests on — not raw sample count, which is a
+tick-rate-dependent proxy — so a trend three seconds past the minimum-sample floor reads
+`low`, and one that has held for three or more minutes reads `high`, matching the brief's
+own two examples directly.
+
+### One concrete instruction, not a bare number
+
+`MaintenanceAdvisor.generate_early_warning` is additive to, and independent of, the
+existing `evaluate()` — the two can both produce output for the same subsystem on the same
+frame (pre-alert typically fires well before a subsystem's HI has fallen far enough for
+`evaluate()`'s own `HI_WATCH` cut to notice), and neither suppresses the other. Each
+subsystem has its own concrete, in-flight action distinct from `SUBSYSTEM_ACTIONS`'
+post-flight ground-crew language — "Reduce throttle to roughly 70% to slow thermal
+buildup" for cooling, "Monitor oil pressure closely; avoid further RPM increases" for
+lubrication — and escalates to suggesting an early RTB once the projected time to the
+warning threshold falls to 20 minutes or under. `predicted_minutes` and `confidence` are
+kept as separate structured fields rather than folded into the action text, so
+`EarlyWarningBanner.tsx` can render "confidence: low" in place of a number without the
+recommendation sentence itself needing two different phrasings.
+
+### Lead time, measured — not assumed
+
+`scripts/validate_physics.py --scenario early-warning` runs `bearing_wear` ramped over 1,
+5 and 15 minutes and records, for each: the first tick pre-alert reaches at least
+`emerging` on the `lubrication` subsystem, the first tick any of that subsystem's channels
+crosses the *existing, unmodified* z-score gate, and the first tick
+`mission_reliability.recommendation` reads `NO-GO` — i.e. what the system would have
+reported with no early-warning layer at all. Real measured output
+(`scripts/output/10_early_warning_lead_time.png`):
+
+| Ramp | pre-alert | hard alert (existing gate) | NO-GO | lead vs. hard alert | lead vs. NO-GO |
+|---|---|---|---|---|---|
+| 1 min | 5 s | 24 s | 43 s | **19 s** | **38 s** |
+| 5 min | 8 s | 29 s | 89 s | **21 s** | **81 s** |
+| 15 min | 39 s | 52 s | 162 s | **13 s** | **123 s** |
+
+Two honest things worth stating plainly rather than smoothing over:
+
+* **These are small numbers, and that is the correct result, not a bug in the detector.**
+  A fixed "~7 minutes" figure would have been fabricated — read literally, the brief's own
+  worked example warns against exactly that. The actual lead time here is governed by how
+  fast `bearing_wear`'s dominant channel, `oil_pressure_kpa`, already crosses the
+  **existing, unmodified** z-score gate: `CHANNEL_SCALES["oil_pressure_kpa"]` is 40 kPa
+  against a healthy operating range of roughly 250–450 kPa, so even a small, consistent
+  mean shift clears `z_threshold = 3.0` quickly once `ResidualMonitor`'s own 6 s EWMA has
+  caught up to it — traced directly: at the 15-minute ramp's hard-alert tick, injected
+  severity is only 0.049 (t = 52 s of a 900 s ramp). The pre-alert layer cannot manufacture
+  lead time against a gate that is already this fast for this specific fault/channel pair
+  without becoming noise-driven itself, and it was deliberately not tuned to do so — see
+  the two tests' significance thresholds above.
+* **Lead time vs. NO-GO is the more decision-relevant number, and it scales exactly as it
+  should**: 38 s → 81 s → 123 s as the ramp slows from 1 to 15 minutes, monotonically. That
+  is the gap between "a specific action is now recommended" and "the mission would have
+  been called NO-GO with no warning that it was coming" — the actual question an operator
+  is asking — and it grows with how much runway a slower-developing fault genuinely leaves.
+  Lead time against the raw hard-alert gate does *not* scale the same way here, for the
+  reason above: both the pre-alert layer and the existing gate react within roughly a
+  minute regardless of ramp speed, because `oil_pressure_kpa`'s existing sensitivity
+  dominates over the fault's own rate of development at this severity and channel.
+
+**Not separately measured, and worth stating as a limitation rather than a claim**: other
+fault/channel pairs whose existing hard-alert channel is less sensitive than
+`oil_pressure_kpa` (a wider `CHANNEL_SCALES` value, a slower-reacting subsystem) would be
+expected to show a larger lead time against the hard alert specifically, since the pre-alert
+layer's own reaction time is set by the same fixed windows (45 s recent / 150 s baseline)
+regardless of which channel it is watching. This has not been run for every fault type —
+`scripts/validate_physics.py --scenario early-warning` currently covers `bearing_wear`
+only, per the brief's "at least one representative fault."
+
 ## Backend module responsibilities
 
 | Module | Responsibility |
@@ -611,17 +795,17 @@ selected one's.
 | `app/sim/simulation_loop.py` | The tick loop: sub-stepping, PHM chain, frame assembly, broadcast |
 | `app/sim/mock_generator.py` | Phase 1 scripted generator, retained as a demo-safety fallback |
 | `app/twin/digital_twin.py` | Healthy reference plant + residual computation |
-| `app/twin/residual_analysis.py` | EWMA statistics, z-scores, shared ML feature layout |
+| `app/twin/residual_analysis.py` | EWMA statistics, z-scores, shared ML feature layout; **Phase 7** — `PreAlertMonitor`/`pre_alert_check`, the earlier variance-ratio + trend-slope tier |
 | `app/ml/anomaly_detector.py` | Per-subsystem anomaly scores and health indicators |
 | `app/ml/fault_classifier.py` | RandomForest inference with confidence fallback |
-| `app/ml/rul_predictor.py` | HI trend fitting and extrapolation to failure |
+| `app/ml/rul_predictor.py` | HI trend fitting and extrapolation to failure; **Phase 7** — `update_early_warnings`, the same fit against a gentler threshold, gated by pre-alert |
 | `app/ml/mission_reliability.py` | Weibull survival over the remaining mission |
 | `app/ml/train/*` | Offline data generation and classifier training |
 | `app/api/ws_telemetry.py` | `/ws/telemetry` connection manager and broadcast |
 | `app/api/control.py` | `/control/*` — fault inject/clear, throttle, time-scale, phase |
 | `app/api/twin_diagnostics.py` | `/twin/diagnosis` — residuals and classifier output |
 | `app/api/health.py` | `/health` liveness |
-| `scripts/validate_physics.py` | Headless mission + fault, and the throttle-transient scenario; writes validation plots |
+| `scripts/validate_physics.py` | Headless mission + fault, and the throttle-transient scenario; writes validation plots; **Phase 7** — `--scenario early-warning`, the real lead-time measurement |
 | `app/core/security.py` | Bearer-token guard for `/control/*` and the telemetry socket |
 | `app/core/engine_params.py` | Every tunable constant, including all Phase 3 additions |
 | `app/db/models.py` | SQLAlchemy tables: missions, telemetry_frames (JSON), fault_events |
@@ -630,7 +814,7 @@ selected one's.
 | `app/physics/electrical_model.py` | Alternator output vs RPM, battery terminal voltage under load |
 | `app/physics/sensor_fault_model.py` | Sensor faults — corrupt the reading, not the engine |
 | `app/ml/efficiency_analysis.py` | BSFC and its rolling trend |
-| `app/ml/maintenance_advisor.py` | Rule-based, auditable maintenance recommendations |
+| `app/ml/maintenance_advisor.py` | Rule-based, auditable maintenance recommendations; **Phase 7** — `generate_early_warning`, one concrete action per gated-in subsystem |
 | `app/ml/mission_report.py` | Post-mission debrief built from stored frames |
 | `app/sim/replay_engine.py` | Streams stored missions over the live contract |
 | `app/ingestion/adapter_interface.py` | `RawEngineData` + `EngineDataAdapter`; simulated impl, CAN stub |
@@ -686,6 +870,7 @@ render unchanged against the extended contract because every new field is option
 | `components/fleet/FleetRosterGrid` | **Phase 6** — one card per UAV, ranked; click selects that UAV and navigates |
 | `components/fleet/FleetTrendMiniCharts` | **Phase 6** — per-UAV health trend, reusing the Lifecycle view's series |
 | `lib/fleet/store.ts` | **Phase 6** — `selectedUavId`, the single state every other store scopes requests to |
+| `components/dashboard/EarlyWarningBanner` | **Phase 7** — the earlier, softer tier ahead of `FaultAlertFeed`; renders nothing when there is no active early warning |
 
 ## Still ahead
 

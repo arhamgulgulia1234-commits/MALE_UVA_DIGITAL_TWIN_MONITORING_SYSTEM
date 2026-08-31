@@ -12,6 +12,28 @@ Two fits are attempted and the better-conditioned one wins:
 
 Returns `None` when the HI is stable or improving — a healthy engine has no meaningful
 RUL and the dashboard shows a dash rather than a fabricated number.
+
+---
+
+## Early warning: the same trend fit, a gentler threshold, gated by pre-alert
+
+`update_early_warnings` (bottom of this file) answers an earlier question than the RUL
+above: not "minutes until failure (HI=40)" but "minutes until this subsystem crosses a
+much gentler warning line (HI=75) it may still be well clear of today." It deliberately
+reuses `_estimate_for` — the identical linear/exponential trend fit against the identical
+per-subsystem history this class already keeps — parameterised with a different failure
+threshold, rather than a second copy of the fitting logic.
+
+It also reuses this class's own fix for the RUL-jump bug (see `smoothing_tau_fall_s`
+below): the same asymmetric EMA — slow to rise, fast to fall — is applied per-subsystem to
+the warning-threshold estimate, for the identical reason. Without it, a warning ETA seeded
+high the instant a trend first becomes fittable would suffer the same "worse degradation
+reads as more time remaining" inversion this file already fixed once for the critical RUL.
+
+The gate is external: `update_early_warnings` is only asked about subsystems the caller
+(`SimulationLoop`) has already determined are at least `"emerging"` in
+`app.twin.residual_analysis.PreAlertMonitor` — a subsystem not in that set is skipped
+entirely, `predicted_minutes=None`, rather than fitting a trend to what is still noise.
 """
 from __future__ import annotations
 
@@ -20,6 +42,34 @@ from collections import deque
 from dataclasses import dataclass
 
 HI_FAILURE_THRESHOLD = 40.0
+#: Meaningfully above the critical/RUL threshold — early warning fires while a subsystem
+#: may still read as broadly healthy on the dashboard's own gauge.
+HI_WARNING_THRESHOLD = 75.0
+
+#: Confidence-label spans, in *simulated* seconds of consistent history actually observed
+#: — not sample count alone, so a 20x demo does not read as "high confidence" faster than
+#: a 1x one just because more ticks arrived per wall-clock second. Chosen so "a prediction
+#: based on 3 data points" (barely past `min_samples`, seconds of span) reads low, and "3
+#: minutes of consistent trend" reads high, matching the spec's own two examples.
+WARNING_CONFIDENCE_LOW_SPAN_S = 60.0
+WARNING_CONFIDENCE_HIGH_SPAN_S = 180.0
+
+
+def _confidence_label(n_samples: int, span_s: float, min_samples: int) -> str:
+    if n_samples < min_samples or span_s < WARNING_CONFIDENCE_LOW_SPAN_S:
+        return "low"
+    if span_s < WARNING_CONFIDENCE_HIGH_SPAN_S:
+        return "medium"
+    return "high"
+
+
+@dataclass
+class WarningEstimate:
+    subsystem: str
+    predicted_minutes: float | None
+    confidence: str  # "low" | "medium" | "high"
+    model: str
+    slope_per_min: float
 
 
 @dataclass
@@ -65,11 +115,18 @@ class RULPredictor:
         self._history: dict[str, deque[tuple[float, float]]] = {}
         self._smoothed: float | None = None
         self._last_time_s: float | None = None
+        #: Early-warning smoothing state is per-subsystem (unlike `_smoothed` above, which
+        #: tracks only the single worst-subsystem critical RUL) because more than one
+        #: subsystem can be gated into early warning at once.
+        self._warning_smoothed: dict[str, float] = {}
+        self._warning_last_time_s: float | None = None
 
     def reset(self) -> None:
         self._history.clear()
         self._smoothed = None
         self._last_time_s = None
+        self._warning_smoothed.clear()
+        self._warning_last_time_s = None
 
     def update(self, sim_time_s: float, health_indicators: dict[str, float]) -> RULEstimate:
         for subsystem, hi in health_indicators.items():
@@ -123,8 +180,16 @@ class RULPredictor:
         )
 
     def _estimate_for(
-        self, subsystem: str, hist: "deque[tuple[float, float]]"
+        self,
+        subsystem: str,
+        hist: "deque[tuple[float, float]]",
+        hi_failure: float | None = None,
     ) -> RULEstimate:
+        """Fit the trend and extrapolate to `hi_failure` (default: the critical RUL
+        threshold, `self.hi_failure`). `update_early_warnings` below calls this with
+        `HI_WARNING_THRESHOLD` instead — same fit, a different target line — so the two
+        predictions can never quietly drift apart into two different trend models."""
+        threshold = self.hi_failure if hi_failure is None else hi_failure
         if len(hist) < self.min_samples:
             return RULEstimate(None, subsystem, "stable", 0.0)
 
@@ -139,29 +204,29 @@ class RULPredictor:
         # Improving, flat, or drifting too gently to distinguish from noise.
         if slope >= -self.min_slope_per_min:
             return RULEstimate(None, subsystem, "stable", slope)
-        if current_hi <= self.hi_failure:
+        if current_hi <= threshold:
             return RULEstimate(0.0, subsystem, "linear", slope)
 
-        # Try the exponential fit on log(HI - HI_fail); fall back to linear.
+        # Try the exponential fit on log(HI - threshold); fall back to linear.
         exp_minutes: float | None = None
         log_pairs = [
-            (x, math.log(v - self.hi_failure))
+            (x, math.log(v - threshold))
             for x, v in zip(xs, values)
-            if v - self.hi_failure > 1e-3
+            if v - threshold > 1e-3
         ]
         if len(log_pairs) >= self.min_samples // 2:
             lx = [p[0] for p in log_pairs]
             ly = [p[1] for p in log_pairs]
             k_slope, k_intercept = _linreg(lx, ly)
             if k_slope < -1e-6:
-                # HI(t) = HI_fail + exp(k_intercept + k_slope*t); solve HI(t) = HI_fail
+                # HI(t) = threshold + exp(k_intercept + k_slope*t); solve HI(t) = threshold
                 # is asymptotic, so solve for the point where the exponential term
                 # decays to 1% of the failure margin — a finite, well-posed horizon.
-                target = math.log(max(1e-3, 0.01 * (values[0] - self.hi_failure)))
+                target = math.log(max(1e-3, 0.01 * (values[0] - threshold)))
                 t_fail = (target - k_intercept) / k_slope
                 exp_minutes = t_fail - xs[-1]
 
-        lin_minutes = (self.hi_failure - intercept) / slope - xs[-1]
+        lin_minutes = (threshold - intercept) / slope - xs[-1]
 
         if exp_minutes is not None and 0.0 <= exp_minutes < lin_minutes:
             minutes, model = exp_minutes, "exponential"
@@ -170,6 +235,77 @@ class RULPredictor:
 
         minutes = max(0.0, min(self.max_minutes, minutes))
         return RULEstimate(minutes, subsystem, model, slope)
+
+    # ---- early warning ---------------------------------------------------------
+
+    def update_early_warnings(
+        self,
+        sim_time_s: float,
+        subsystem_pre_alert_levels: dict[str, str],
+    ) -> dict[str, WarningEstimate]:
+        """One `WarningEstimate` per subsystem currently gated in by pre-alert.
+
+        Must be called after `update()` in the same tick — it reads `self._history`,
+        which `update()` is what appends the current tick's HI samples to. Takes the worst
+        pre-alert level per subsystem (`"none"` / `"emerging"` / `"building"`) rather than
+        raw per-channel results, matching the granularity `MaintenanceAdvisor.
+        generate_early_warning` and the `early_warnings` telemetry field both operate at.
+
+        A subsystem at `"none"` is skipped entirely — no entry in the returned dict, and
+        its smoothing state is dropped so a later re-trigger starts fresh rather than
+        resuming a stale smoothed value from a previous, unrelated episode.
+        """
+        dt_s = (
+            0.0
+            if self._warning_last_time_s is None
+            else max(0.0, sim_time_s - self._warning_last_time_s)
+        )
+        self._warning_last_time_s = sim_time_s
+
+        results: dict[str, WarningEstimate] = {}
+        for subsystem, hist in self._history.items():
+            level = subsystem_pre_alert_levels.get(subsystem, "none")
+            if level == "none":
+                self._warning_smoothed.pop(subsystem, None)
+                continue
+
+            estimate = self._estimate_for(subsystem, hist, hi_failure=HI_WARNING_THRESHOLD)
+            n = len(hist)
+            span_s = (hist[-1][0] - hist[0][0]) if n >= 2 else 0.0
+            confidence = _confidence_label(n, span_s, self.min_samples)
+            minutes = self._smooth_warning(subsystem, estimate.minutes, dt_s)
+
+            results[subsystem] = WarningEstimate(
+                subsystem=subsystem,
+                predicted_minutes=minutes,
+                confidence=confidence,
+                model=estimate.model,
+                slope_per_min=estimate.slope_per_min,
+            )
+        return results
+
+    def _smooth_warning(
+        self, subsystem: str, raw: float | None, dt_s: float
+    ) -> float | None:
+        """The same asymmetric EMA as the critical-RUL smoothing above, kept per-subsystem.
+
+        `raw is None` means pre-alert has fired but the trend fit itself does not have
+        enough samples yet (`_estimate_for` needs `min_samples`, pre-alert's own gate can
+        trip on fewer). Rather than holding a stale smoothed number across that gap, drop
+        it — `confidence` already tells the caller a number is not available yet, which is
+        the honest state, not a held-over estimate from before."""
+        if raw is None:
+            self._warning_smoothed.pop(subsystem, None)
+            return None
+        prev = self._warning_smoothed.get(subsystem)
+        if prev is None:
+            self._warning_smoothed[subsystem] = raw
+            return raw
+        tau = self.smoothing_tau_s if raw >= prev else self.smoothing_tau_fall_s
+        alpha = 1.0 - math.exp(-dt_s / max(1e-6, tau))
+        new = prev + (raw - prev) * alpha
+        self._warning_smoothed[subsystem] = new
+        return max(0.0, new)
 
 
 def _linreg(xs: list[float], ys: list[float]) -> tuple[float, float]:

@@ -107,6 +107,27 @@ export interface MaintenanceAdvisory {
   basis: string[];
 }
 
+export type PreAlertState = "emerging" | "building";
+export type ConfidenceLevel = "low" | "medium" | "high";
+
+/**
+ * A NEW, earlier tier in front of the existing hard fault-alert threshold — fires on a
+ * subtle statistical fluctuation well before `active_faults`/FaultAlertFeed's z-score
+ * gate would trip, with a specific recommended action rather than a bare number. See
+ * backend/app/twin/residual_analysis.py::pre_alert_check and
+ * backend/app/ml/maintenance_advisor.py::MaintenanceAdvisor.generate_early_warning.
+ */
+export interface EarlyWarning {
+  subsystem: string;
+  pre_alert_state: PreAlertState;
+  /** Null when the trend fit does not have enough consistent samples yet — show
+   * `confidence` instead of fabricating a number in that case. */
+  predicted_minutes: number | null;
+  confidence: ConfidenceLevel;
+  recommended_action: string;
+  basis: string[];
+}
+
 export interface TelemetryFrame {
   timestamp: number;
   mission_phase: MissionPhase;
@@ -173,6 +194,10 @@ export interface TelemetryFrame {
   /** Trending toward 1 means the fused estimate has shifted to trusting the raw sensor
    * almost completely — the zero-wear model's own prediction confidence has degraded. */
   oil_pressure_kalman_gain?: number | null;
+
+  /** Early warning: a softer, earlier tier ahead of `active_faults`/the hard fault-alert
+   * threshold. Additive — [] (or absent) on every frame predating this feature. */
+  early_warnings?: EarlyWarning[];
 }
 
 /** Each CHT probe's residual against the fused estimate — not against each other. */

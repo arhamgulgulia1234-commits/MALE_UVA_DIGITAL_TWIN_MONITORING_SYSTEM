@@ -142,6 +142,28 @@ class MaintenanceAdvisory(BaseModel):
     basis: list[str]
 
 
+PreAlertState = Literal["emerging", "building"]
+ConfidenceLevel = Literal["low", "medium", "high"]
+
+
+class EarlyWarning(BaseModel):
+    """A NEW, earlier tier in front of the existing hard fault-alert threshold (the
+    `ResidualMonitor` z-score gate behind `active_faults`/FaultAlertFeed) — fires on a
+    subtle statistical fluctuation (app/twin/residual_analysis.py::pre_alert_check) well
+    before that gate would trip, with a specific recommended action rather than a bare
+    number. See app/ml/maintenance_advisor.py::MaintenanceAdvisor.generate_early_warning.
+    """
+
+    subsystem: str
+    pre_alert_state: PreAlertState
+    #: None when the trend fit does not have enough consistent samples yet — the frontend
+    #: shows `confidence` instead of a fabricated number in that case.
+    predicted_minutes: Optional[float] = None
+    confidence: ConfidenceLevel
+    recommended_action: str
+    basis: list[str]
+
+
 class TelemetryFrame(BaseModel):
     timestamp: float
     mission_phase: MissionPhase
@@ -214,6 +236,10 @@ class TelemetryFrame(BaseModel):
     #: almost completely — the zero-wear model's own prediction confidence has degraded,
     #: which is itself a health signal (see oil_pressure_fusion.py's module docstring).
     oil_pressure_kalman_gain: Optional[float] = None
+
+    #: Early warning: a softer, earlier tier ahead of `active_faults`/the hard fault-alert
+    #: threshold. Additive — [] on every frame predating this feature. See EarlyWarning.
+    early_warnings: list[EarlyWarning] = []
 
 
 # ---- Phase 1/2 request models -----------------------------------------------
