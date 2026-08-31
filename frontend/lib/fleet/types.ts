@@ -18,3 +18,19 @@ export interface FleetOverviewEntry {
   active_fault_count: number;
   total_operating_hours: number;
 }
+
+/** GET /fleet/overview's `fleet_mission_reliability` — joint squadron-wide read, not a
+ * per-UAV figure. `all_succeed_probability` is the product of each UAV's live
+ * `mission_reliability.score`. Null fields mean no UAV has reported a frame yet. */
+export interface FleetMissionReliability {
+  all_succeed_probability: number | null;
+  weakest_uav_id: string | null;
+  weakest_score: number | null;
+}
+
+/** GET /fleet/overview's response shape (distinct from /fleet/rankings, which stays a
+ * bare, sorted FleetOverviewEntry[]). */
+export interface FleetOverviewResponse {
+  roster: FleetOverviewEntry[];
+  fleet_mission_reliability: FleetMissionReliability;
+}
