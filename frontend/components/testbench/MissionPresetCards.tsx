@@ -63,7 +63,7 @@ function Card({
     >
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h3 className="font-display text-sm font-bold uppercase tracking-[0.14em] text-status-cyan">
+          <h3 className="font-display text-sm font-bold uppercase tracking-[0.08em] text-status-cyan">
             {card.label}
           </h3>
           <p className="mt-0.5 text-[10px] text-slate-500">

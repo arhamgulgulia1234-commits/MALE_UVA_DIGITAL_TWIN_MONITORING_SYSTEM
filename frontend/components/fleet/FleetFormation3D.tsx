@@ -253,7 +253,7 @@ function ReadoutStat({
 }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-[0.15em] text-slate-500">{label}</div>
+      <div className="text-[10px] uppercase tracking-[0.08em] text-slate-500">{label}</div>
       <div className={`font-display text-xl font-bold ${tone}`}>{value}</div>
     </div>
   );

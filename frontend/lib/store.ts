@@ -10,6 +10,7 @@
  * picked up by every request the very next time one fires.
  */
 import { create } from "zustand";
+import { getAuthToken } from "./auth/store";
 import { useFleetStore } from "./fleet/store";
 import type { ConnectionStatus } from "./websocket";
 import type {
@@ -85,14 +86,9 @@ interface TelemetryStore {
   resetForUavSwitch: () => void;
 }
 
-/**
- * Auth token, when the backend has TELEMETRY_AUTH_ENABLED=true. Left empty for the
- * default open-demo configuration.
- */
-const AUTH_TOKEN = process.env.NEXT_PUBLIC_TELEMETRY_TOKEN ?? "";
-
 function authHeaders(): Record<string, string> {
-  return AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {};
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 /** Appends the currently selected UAV's id as a query param on every request this

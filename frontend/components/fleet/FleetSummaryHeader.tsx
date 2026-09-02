@@ -32,14 +32,14 @@ export function FleetSummaryHeader({ roster }: { roster: FleetOverviewEntry[] })
             <span className={`font-display text-2xl font-bold ${RECOMMENDATION_STYLE[rec].tone}`}>
               {counts[rec]}
             </span>
-            <span className="text-[10px] uppercase tracking-[0.15em] text-slate-500">
+            <span className="text-[10px] uppercase tracking-[0.08em] text-slate-500">
               {RECOMMENDATION_STYLE[rec].label}
             </span>
           </div>
         ))}
         <div className="flex flex-col items-center gap-1 rounded-lg border border-base-border/70 bg-base-panel/50 py-3">
           <span className="font-display text-2xl font-bold text-slate-200">{activeFaults}</span>
-          <span className="text-[10px] uppercase tracking-[0.15em] text-slate-500">
+          <span className="text-[10px] uppercase tracking-[0.08em] text-slate-500">
             Active Faults
           </span>
         </div>

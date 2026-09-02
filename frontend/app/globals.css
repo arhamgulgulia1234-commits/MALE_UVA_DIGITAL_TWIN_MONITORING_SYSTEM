@@ -17,13 +17,6 @@ body {
   min-height: 100%;
 }
 
-body {
-  background-image:
-    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(63, 208, 224, 0.08), transparent),
-    radial-gradient(ellipse 60% 40% at 100% 100%, rgba(245, 166, 35, 0.05), transparent);
-  background-attachment: fixed;
-}
-
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -40,8 +33,10 @@ body {
 }
 
 @layer components {
+  /* Flat solid panel, one shade lighter than the page background — no blur/transparency
+     layering (was bg-base-panel/70 + backdrop-blur-sm, a glass effect). */
   .glass-panel {
-    @apply relative rounded-xl border border-base-border bg-base-panel/70 backdrop-blur-sm;
+    @apply relative rounded-xl border border-base-border bg-base-panel;
   }
 
   .glass-panel-glow {
@@ -49,7 +44,7 @@ body {
   }
 
   .panel-title {
-    @apply font-display text-xs font-semibold uppercase tracking-[0.18em] text-slate-400;
+    @apply font-display text-xs font-semibold uppercase tracking-[0.1em] text-slate-400;
   }
 
   .tabular {
@@ -59,6 +54,6 @@ body {
 
 @layer utilities {
   .text-shadow-glow {
-    text-shadow: 0 0 12px currentColor;
+    text-shadow: none;
   }
 }

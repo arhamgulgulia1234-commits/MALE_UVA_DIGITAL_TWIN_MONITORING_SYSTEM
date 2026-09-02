@@ -15,9 +15,9 @@ const SUBSYSTEM_LABEL: Partial<Record<keyof SubsystemScores, string>> = {
 };
 
 function scoreColor(score: number): string {
-  if (score >= 85) return "#22d3a8";
-  if (score >= 60) return "#f5a623";
-  return "#ef4a5f";
+  if (score >= 85) return "#37af92";
+  if (score >= 60) return "#d59834";
+  return "#da6978";
 }
 
 function SubsystemRow({ label, value }: { label: string; value: number }) {
@@ -57,7 +57,7 @@ export function HealthScoreGauge() {
         <span className="tabular text-6xl font-bold leading-none" style={{ color }}>
           {Math.round(smoothedOverall)}
         </span>
-        <span className="mt-2 text-[10px] font-medium uppercase tracking-[0.22em] text-slate-500">
+        <span className="mt-2 text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">
           Overall
         </span>
       </RadialGauge>

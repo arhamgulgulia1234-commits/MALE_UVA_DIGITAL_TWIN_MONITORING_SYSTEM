@@ -8,8 +8,8 @@ import { useTelemetryStore } from "@/lib/store";
 import type { EfficiencyTrend } from "@/lib/types";
 
 const SERIES: SeriesDef[] = [
-  { key: "bsfc", color: "#3fd0e0", label: "BSFC (g/kWh)", yAxisId: "left" },
-  { key: "cov", color: "#f5a623", label: "COV(IMEP) %", yAxisId: "right" },
+  { key: "bsfc", color: "#4ab9c6", label: "BSFC (g/kWh)", yAxisId: "left" },
+  { key: "cov", color: "#d59834", label: "COV(IMEP) %", yAxisId: "right" },
 ];
 
 const TREND_STYLE: Record<EfficiencyTrend, { label: string; className: string }> = {

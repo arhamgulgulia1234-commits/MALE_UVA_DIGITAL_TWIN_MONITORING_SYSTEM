@@ -47,7 +47,7 @@ export default function FleetPage() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-30 border-b border-base-border bg-base-bg/90 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-base-border bg-base-bg">
         <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-status-cyan/40 bg-status-cyan/10">

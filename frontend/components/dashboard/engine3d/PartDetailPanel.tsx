@@ -25,9 +25,9 @@ import type { SubsystemScores } from "@/lib/types";
  */
 
 function scoreColor(score: number): string {
-  if (score >= 85) return "#22d3a8";
-  if (score >= 60) return "#f5a623";
-  return "#ef4a5f";
+  if (score >= 85) return "#37af92";
+  if (score >= 60) return "#d59834";
+  return "#da6978";
 }
 
 const SUBSYSTEM_LABEL: Record<string, string> = {
@@ -58,11 +58,11 @@ export function PartDetailPanel({
   );
 
   return (
-    <div className="absolute left-0 top-0 z-20 flex h-full w-[200px] flex-col border-r border-base-border bg-base-bg/95 backdrop-blur-md">
+    <div className="absolute left-0 top-0 z-20 flex h-full w-[200px] flex-col border-r border-base-border bg-base-bg">
       <div className="flex items-start justify-between gap-2 border-b border-base-border px-2.5 py-1.5">
         <div>
           <div className="text-[11px] font-semibold text-slate-100">{part.displayName}</div>
-          <div className="font-mono text-[8px] uppercase tracking-[0.16em] text-slate-500">
+          <div className="font-mono text-[8px] uppercase tracking-[0.09em] text-slate-500">
             Part Inspector
           </div>
         </div>
@@ -79,7 +79,7 @@ export function PartDetailPanel({
         {/* --- subsystem health, first: it is the headline judgement ---- */}
         <section>
           <div className="mb-1 flex items-baseline justify-between">
-            <span className="font-mono text-[8px] uppercase tracking-[0.16em] text-slate-500">
+            <span className="font-mono text-[8px] uppercase tracking-[0.09em] text-slate-500">
               {SUBSYSTEM_LABEL[part.healthSubsystem] ?? part.healthSubsystem} index
             </span>
             <span
@@ -122,7 +122,7 @@ export function PartDetailPanel({
 
         {/* --- live telemetry ------------------------------------------- */}
         <section>
-          <div className="mb-1 font-mono text-[8px] uppercase tracking-[0.16em] text-slate-500">
+          <div className="mb-1 font-mono text-[8px] uppercase tracking-[0.09em] text-slate-500">
             Live telemetry
           </div>
           <div className="space-y-0.5">
@@ -170,7 +170,7 @@ export function PartDetailPanel({
         anatomy lesson: it names the exact file that simulates the part you just clicked.
       */}
       <div className="border-t border-base-border px-2.5 py-1.5">
-        <div className="mb-1 font-mono text-[8px] uppercase tracking-[0.16em] text-slate-500">
+        <div className="mb-1 font-mono text-[8px] uppercase tracking-[0.09em] text-slate-500">
           Governed by
         </div>
         <code className="block break-all rounded border border-status-cyan/35 bg-status-cyan/10 px-1.5 py-1 font-mono text-[9px] leading-[1.4] text-status-cyan">

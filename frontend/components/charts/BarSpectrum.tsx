@@ -9,9 +9,9 @@ interface BarSpectrumProps {
 }
 
 const toneColor: Record<string, string> = {
-  normal: "#3fd0e0",
-  warn: "#f5a623",
-  critical: "#ef4a5f",
+  normal: "#4ab9c6",
+  warn: "#d59834",
+  critical: "#da6978",
 };
 
 export function BarSpectrum({ data, height = 180, maxValue }: BarSpectrumProps) {
@@ -34,7 +34,7 @@ export function BarSpectrum({ data, height = 180, maxValue }: BarSpectrumProps) 
             width={36}
           />
           <Tooltip
-            cursor={{ fill: "rgba(63,208,224,0.06)" }}
+            cursor={{ fill: "rgba(74,185,198,0.06)" }}
             contentStyle={{
               background: "#131a28",
               border: "1px solid #1e2734",

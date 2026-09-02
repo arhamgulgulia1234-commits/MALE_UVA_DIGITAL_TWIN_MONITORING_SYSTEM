@@ -68,18 +68,18 @@ const PARAMETER_LABEL: Record<string, string> = {
 };
 
 const TEMP_SERIES: SeriesDef[] = [
-  { key: "egt", color: "#ef4a5f", label: "Max EGT (°C)", yAxisId: "left" },
-  { key: "cht", color: "#f5a623", label: "CHT (°C)", yAxisId: "left" },
+  { key: "egt", color: "#da6978", label: "Max EGT (°C)", yAxisId: "left" },
+  { key: "cht", color: "#d59834", label: "CHT (°C)", yAxisId: "left" },
   { key: "oil_temp", color: "#c084fc", label: "Oil Temp (°C)", yAxisId: "left" },
-  { key: "rpm", color: "#3fd0e0", label: "RPM", yAxisId: "right" },
+  { key: "rpm", color: "#4ab9c6", label: "RPM", yAxisId: "right" },
 ];
 
 const HEALTH_SERIES: SeriesDef[] = [
-  { key: "health", color: "#22d3a8", label: "Overall Health", yAxisId: "left" },
-  { key: "reliability", color: "#3fd0e0", label: "Mission Reliability ×100", yAxisId: "left" },
+  { key: "health", color: "#37af92", label: "Overall Health", yAxisId: "left" },
+  { key: "reliability", color: "#4ab9c6", label: "Mission Reliability ×100", yAxisId: "left" },
   // Phase 5: recovery_reliability, in amber so it reads as its own thing next to
   // mission reliability's cyan rather than a shade of the same series.
-  { key: "recovery", color: "#f5a623", label: "Recovery Reliability ×100", yAxisId: "left" },
+  { key: "recovery", color: "#d59834", label: "Recovery Reliability ×100", yAxisId: "left" },
   { key: "oil_p", color: "#c084fc", label: "Oil Press. (kPa)", yAxisId: "right" },
 ];
 
@@ -87,9 +87,9 @@ const HEALTH_SERIES: SeriesDef[] = [
 const minuteTick = (v: number) => `${v}m`;
 
 function scoreColor(score: number): string {
-  if (score >= 85) return "#22d3a8";
-  if (score >= 60) return "#f5a623";
-  return "#ef4a5f";
+  if (score >= 85) return "#37af92";
+  if (score >= 60) return "#d59834";
+  return "#da6978";
 }
 
 function Stat({
@@ -185,7 +185,7 @@ export function ScenarioResultsView() {
       >
         <div
           className={clsx(
-            "font-display text-4xl font-bold tracking-[0.12em]",
+            "font-display text-4xl font-bold tracking-[0.07em]",
             style.text,
             summary.verdict !== "PASS" && "animate-pulseGlow"
           )}
@@ -232,7 +232,7 @@ export function ScenarioResultsView() {
             <span className="tabular text-3xl font-bold" style={{ color: healthColor }}>
               {Math.round(summary.min_health_score)}
             </span>
-            <span className="mt-0.5 text-[9px] uppercase tracking-[0.18em] text-slate-500">
+            <span className="mt-0.5 text-[9px] uppercase tracking-[0.1em] text-slate-500">
               Worst
             </span>
           </RadialGauge>

@@ -83,13 +83,13 @@ export function RadialGauge({
           strokeWidth={strokeWidth}
           strokeLinecap="round"
           strokeDasharray={circumference}
-          style={{ strokeDashoffset: dashoffset, filter: `drop-shadow(0 0 8px ${color}80)` }}
+          style={{ strokeDashoffset: dashoffset }}
         />
       </svg>
       {needleMarker && (
         <motion.div
           className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full"
-          style={{ left: markerX, top: markerY, background: color, boxShadow: `0 0 10px 2px ${color}` }}
+          style={{ left: markerX, top: markerY, background: color }}
         />
       )}
       <div className="absolute inset-0 flex flex-col items-center justify-center">{children}</div>

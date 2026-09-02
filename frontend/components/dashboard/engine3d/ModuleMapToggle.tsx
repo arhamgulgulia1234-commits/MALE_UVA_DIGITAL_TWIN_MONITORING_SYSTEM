@@ -20,8 +20,8 @@ export function ModuleMap({
   onSelect: (id: string) => void;
 }) {
   return (
-    <div className="absolute inset-0 z-10 overflow-y-auto bg-base-bg/95 px-3 pb-3 pt-12 backdrop-blur-sm">
-      <div className="mb-2 font-mono text-[8px] uppercase tracking-[0.18em] text-slate-500">
+    <div className="absolute inset-0 z-10 overflow-y-auto bg-base-bg px-3 pb-3 pt-12">
+      <div className="mb-2 font-mono text-[8px] uppercase tracking-[0.1em] text-slate-500">
         Physical part → simulating module
       </div>
       <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
@@ -40,7 +40,7 @@ export function ModuleMap({
               <span className="truncate text-[10px] font-medium text-slate-200">
                 {part.displayName}
               </span>
-              <span className="shrink-0 font-mono text-[7px] uppercase tracking-[0.14em] text-slate-600">
+              <span className="shrink-0 font-mono text-[7px] uppercase tracking-[0.08em] text-slate-600">
                 {part.healthSubsystem}
               </span>
             </div>

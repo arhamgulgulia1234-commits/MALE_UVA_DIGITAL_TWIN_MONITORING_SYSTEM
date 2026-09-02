@@ -70,10 +70,10 @@ export const COLORS = {
   brass: "#b08d4f",
   /** Ignition harness — the orange leads in boxer-engine-render.png. */
   harness: "#E8792B",
-  go: "#22d3a8",
-  caution: "#f5a623",
-  nogo: "#ef4a5f",
-  cyan: "#3fd0e0",
+  go: "#37af92",
+  caution: "#d59834",
+  nogo: "#da6978",
+  cyan: "#4ab9c6",
 } as const;
 
 /**

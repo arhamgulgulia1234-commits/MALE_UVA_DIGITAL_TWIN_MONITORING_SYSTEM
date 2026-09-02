@@ -60,7 +60,7 @@ export function HealthTrendAcrossMissions() {
         <>
           <MultiLineChart
             data={data}
-            series={[{ key: "health", color: "#3fd0e0", label: "Health score" }]}
+            series={[{ key: "health", color: "#4ab9c6", label: "Health score" }]}
             xKey="mission"
             xTickFormatter={(v) => `#${v}`}
             height={220}

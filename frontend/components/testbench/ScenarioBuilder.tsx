@@ -255,7 +255,7 @@ export function ScenarioBuilder() {
           <span className="panel-title">Pre-existing Wear</span>
           <span className="text-[10px] text-slate-600">Condition at T+0</span>
         </div>
-        <div className="grid max-h-52 grid-cols-1 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-2">
+        <div className="grid max-h-64 grid-cols-1 gap-1.5 overflow-y-auto pr-1">
           {FAULT_CATALOG.map((fault) => {
             const value = draft.initial_fault_severities[fault.type] ?? 0;
             return (
@@ -276,7 +276,7 @@ export function ScenarioBuilder() {
                     setFaultSeverity(fault.type, Number(e.target.value) / 100)
                   }
                   className={clsx(
-                    "h-1 flex-1",
+                    "h-1 min-w-0 flex-1",
                     value > 0.001 ? "accent-status-amber" : "accent-status-idle"
                   )}
                 />
@@ -432,7 +432,7 @@ export function ScenarioBuilder() {
             onClick={submitScenario}
             disabled={running}
             className={clsx(
-              "flex-1 rounded-md border px-4 py-2.5 font-display text-sm font-semibold uppercase tracking-[0.12em] transition-colors",
+              "flex-1 rounded-md border px-4 py-2.5 font-display text-sm font-semibold uppercase tracking-[0.07em] transition-colors",
               running
                 ? "animate-pulseGlow border-status-amber/50 bg-status-amber/10 text-status-amber"
                 : "border-status-cyan/50 bg-status-cyan/15 text-status-cyan shadow-glow hover:bg-status-cyan/25"

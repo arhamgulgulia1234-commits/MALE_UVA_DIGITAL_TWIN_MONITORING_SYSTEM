@@ -80,7 +80,7 @@ const ALTITUDE_DEBOUNCE_MS = 220;
 const PLOT_HEIGHT = 330;
 const MARGIN = { top: 10, right: 14, bottom: 34, left: 54 };
 
-const LIVE_COLOR = "#f5a623";
+const LIVE_COLOR = "#d59834";
 const TARGET_COLOR = "#e8f3ff";
 
 type MapsByMetric = Partial<Record<PerformanceMetric, PerformanceMapResponse>>;

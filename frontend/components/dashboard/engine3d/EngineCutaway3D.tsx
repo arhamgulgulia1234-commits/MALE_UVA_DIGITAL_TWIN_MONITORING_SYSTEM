@@ -121,7 +121,7 @@ export function EngineCutaway3D() {
           {selectedPart && mode !== "modules" && (
             <button
               onClick={clear}
-              className="absolute bottom-3 right-3 z-20 rounded-lg border border-base-border bg-base-bg/85 px-2.5 py-1 font-mono text-[10px] text-slate-400 backdrop-blur transition-colors hover:border-status-cyan/40 hover:text-status-cyan"
+              className="absolute bottom-3 right-3 z-20 rounded-lg border border-base-border bg-base-bg px-2.5 py-1 font-mono text-[10px] text-slate-400 transition-colors hover:border-status-cyan/40 hover:text-status-cyan"
             >
               Reset View
             </button>
@@ -269,7 +269,7 @@ function JitterRig({ children }: { children: React.ReactNode }) {
 function RimLight() {
   const light = useRef<THREE.SpotLight>(null);
   const target = useMemo(() => new THREE.Color(), []);
-  const current = useMemo(() => new THREE.Color("#22d3a8"), []);
+  const current = useMemo(() => new THREE.Color("#37af92"), []);
 
   useFrame((_, delta) => {
     if (!light.current) return;

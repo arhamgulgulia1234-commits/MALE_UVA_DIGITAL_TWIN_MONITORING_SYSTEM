@@ -282,7 +282,7 @@ export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean })
                     ref={(el) => {
                       lineRefs.current[c.key] = el;
                     }}
-                    stroke={hovered ? "#3fd0e0" : "rgba(63,208,224,0.5)"}
+                    stroke={hovered ? "#4ab9c6" : "rgba(74,185,198,0.5)"}
                     strokeWidth={hovered ? 1.6 : 1}
                     strokeDasharray="3,3"
                   />
@@ -291,7 +291,7 @@ export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean })
                       dotRefs.current[c.key] = el;
                     }}
                     r={hovered ? 3 : 2.2}
-                    fill={hovered ? "#3fd0e0" : "rgba(63,208,224,0.65)"}
+                    fill={hovered ? "#4ab9c6" : "rgba(74,185,198,0.65)"}
                   />
                 </g>
               );
@@ -317,24 +317,22 @@ export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean })
                   minHeight: LABEL_HEIGHT,
                   boxSizing: "border-box",
                   padding: "6px 8px",
-                  border: hovered ? "1px dashed #3fd0e0" : "1px dashed rgba(63,208,224,0.55)",
+                  border: hovered ? "1px dashed #4ab9c6" : "1px dashed rgba(74,185,198,0.55)",
                   borderRadius: 4,
-                  background: "rgba(10,14,20,0.86)",
+                  background: "#0f1420",
                   color: "#cfd8e3",
                   fontFamily: "var(--font-mono), monospace",
                   fontSize: 8,
                   lineHeight: 1.4,
                   textAlign: "left",
-                  backdropFilter: "blur(2px)",
                   pointerEvents: "auto",
                   cursor: "pointer",
-                  boxShadow: hovered ? "0 0 10px rgba(63,208,224,0.55)" : "none",
-                  transition: "border-color 120ms, box-shadow 120ms",
+                  transition: "border-color 120ms",
                 }}
               >
                 <div
                   style={{
-                    color: "#3fd0e0",
+                    color: "#4ab9c6",
                     fontWeight: 700,
                     letterSpacing: "0.08em",
                     marginBottom: 2,
@@ -377,10 +375,10 @@ export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean })
                 alignItems: "center",
                 gap: 5,
                 padding: "4px 7px",
-                border: "1.5px dashed #f5a623",
+                border: "1.5px dashed #d59834",
                 borderRadius: 4,
                 background: "rgba(24,18,6,0.9)",
-                color: "#f5a623",
+                color: "#d59834",
                 fontFamily: "var(--font-mono), monospace",
                 fontSize: 8,
                 whiteSpace: "nowrap",
@@ -394,7 +392,7 @@ export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean })
                   width: 12,
                   height: 12,
                   borderRadius: "50%",
-                  border: "1.5px dashed #f5a623",
+                  border: "1.5px dashed #d59834",
                   fontWeight: 700,
                   fontSize: 8,
                 }}

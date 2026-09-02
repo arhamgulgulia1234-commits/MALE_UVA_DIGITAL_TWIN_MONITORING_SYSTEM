@@ -101,7 +101,7 @@ function SetpointColumn({
   return (
     <div className="flex-1 rounded-lg border border-base-border/70 bg-base-panel2/30 p-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className={clsx("font-display text-xs font-semibold uppercase tracking-[0.14em]", accent)}>
+        <span className={clsx("font-display text-xs font-semibold uppercase tracking-[0.08em]", accent)}>
           {title}
         </span>
         {!evaluation.feasible && (
@@ -255,7 +255,7 @@ export function OptimizerPanel() {
           onClick={submit}
           disabled={optimizing}
           className={clsx(
-            "ml-auto rounded-md border px-5 py-2 font-display text-sm font-semibold uppercase tracking-[0.12em] transition-colors",
+            "ml-auto rounded-md border px-5 py-2 font-display text-sm font-semibold uppercase tracking-[0.07em] transition-colors",
             optimizing
               ? "animate-pulseGlow border-status-amber/50 bg-status-amber/10 text-status-amber"
               : "border-status-cyan/50 bg-status-cyan/15 text-status-cyan shadow-glow hover:bg-status-cyan/25"
@@ -310,7 +310,7 @@ export function OptimizerPanel() {
 
           {!result.feasible && (
             <div className="rounded-lg border border-status-red/50 bg-status-red/10 p-3">
-              <p className="font-display text-xs font-bold uppercase tracking-[0.14em] text-status-red">
+              <p className="font-display text-xs font-bold uppercase tracking-[0.08em] text-status-red">
                 No safe setpoint exists here
               </p>
               <p className="mt-1 text-[11px] text-slate-300">

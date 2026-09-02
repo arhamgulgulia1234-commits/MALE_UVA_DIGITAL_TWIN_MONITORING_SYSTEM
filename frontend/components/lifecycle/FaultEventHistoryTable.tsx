@@ -55,7 +55,7 @@ export function FaultEventHistoryTable() {
     >
       <div className="max-h-[280px] overflow-y-auto">
         <table className="w-full border-collapse text-xs">
-          <thead className="sticky top-0 bg-base-panel/95 backdrop-blur">
+          <thead className="sticky top-0 bg-base-panel">
             <tr className="border-b border-base-border/70 text-[10px] uppercase tracking-wider text-slate-500">
               <th className="px-3 py-2 text-left font-medium">Fault type</th>
               <th className="px-3 py-2 text-right font-medium">Missions active in</th>

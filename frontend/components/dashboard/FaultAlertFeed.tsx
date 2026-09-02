@@ -27,9 +27,9 @@ function severityTone(s: number): Tone {
 }
 
 const TONE_HEX: Record<Tone, string> = {
-  nogo: "#ef4a5f",
-  caution: "#f5a623",
-  cyan: "#3fd0e0",
+  nogo: "#da6978",
+  caution: "#d59834",
+  cyan: "#4ab9c6",
 };
 
 /**
@@ -118,7 +118,7 @@ function FeedItem({ entry, meta, tone, displaySeverity, detail }: FeedItemProps)
           ref={flashRef}
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 rounded-lg"
-          style={{ boxShadow: `inset 0 0 0 1px ${TONE_HEX[tone]}, 0 0 18px 1px ${TONE_HEX[tone]}66` }}
+          style={{ boxShadow: `inset 0 0 0 1px ${TONE_HEX[tone]}` }}
         />
       )}
       <span

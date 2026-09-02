@@ -16,13 +16,16 @@ const config: Config = {
           panel2: "#131a28",
           border: "#1e2734",
         },
+        // Desaturated from the original neon HUD values (go #22d3a8, amber/caution
+        // #f5a623, red/nogo #ef4a5f, cyan #3fd0e0) for the control-room restyle — same
+        // hues and semantic meaning, contrast checked to stay >=4.5:1 on base.bg/panel.
         status: {
-          go: "#22d3a8",
-          caution: "#f5a623",
-          nogo: "#ef4a5f",
-          cyan: "#3fd0e0",
-          amber: "#f5a623",
-          red: "#ef4a5f",
+          go: "#37af92",
+          caution: "#d59834",
+          nogo: "#da6978",
+          cyan: "#4ab9c6",
+          amber: "#d59834",
+          red: "#da6978",
           idle: "#5b6b82",
         },
         // Brand gold, sampled from the VAYUDRISHTI emblem — deliberately its own token
@@ -37,24 +40,19 @@ const config: Config = {
         mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
         display: ["var(--font-display)", "ui-sans-serif", "system-ui", "sans-serif"],
       },
+      // Crisp 1px status-colored rings, no blur halo — was a 24-28px glow blur layered
+      // under each ring; control-room panels get a flat border instead.
       boxShadow: {
-        glow: "0 0 0 1px rgba(63,208,224,0.15), 0 0 24px -8px rgba(63,208,224,0.35)",
-        "glow-amber": "0 0 0 1px rgba(245,166,35,0.2), 0 0 24px -6px rgba(245,166,35,0.45)",
-        "glow-red": "0 0 0 1px rgba(239,74,95,0.25), 0 0 28px -6px rgba(239,74,95,0.55)",
-        "glow-go": "0 0 0 1px rgba(34,211,168,0.2), 0 0 24px -6px rgba(34,211,168,0.45)",
+        glow: "0 0 0 1px rgba(74,185,198,0.4)",
+        "glow-amber": "0 0 0 1px rgba(213,152,52,0.45)",
+        "glow-red": "0 0 0 1px rgba(218,105,120,0.45)",
+        "glow-go": "0 0 0 1px rgba(55,175,146,0.4)",
       },
       keyframes: {
-        pulseGlow: {
-          "0%, 100%": { opacity: "1" },
-          "50%": { opacity: "0.55" },
-        },
         scanline: {
           "0%": { backgroundPosition: "0 0" },
           "100%": { backgroundPosition: "0 100%" },
         },
-      },
-      animation: {
-        pulseGlow: "pulseGlow 1.6s ease-in-out infinite",
       },
     },
   },

@@ -29,12 +29,12 @@ export default function TestBenchPage() {
     <div className="flex min-h-screen flex-col">
       {/* Distinct header treatment from the live dashboard's cyan: amber hazard striping,
           so the two modes are never confused at a glance. */}
-      <header className="sticky top-0 z-30 border-b border-status-amber/40 bg-base-bg/95 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-status-amber/40 bg-base-bg">
         <div
           className="h-1 w-full"
           style={{
             backgroundImage:
-              "repeating-linear-gradient(45deg, rgba(245,166,35,0.65) 0 10px, transparent 10px 20px)",
+              "repeating-linear-gradient(45deg, rgba(213,152,52,0.65) 0 10px, transparent 10px 20px)",
           }}
         />
         <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
@@ -73,7 +73,7 @@ export default function TestBenchPage() {
           <ModeNav />
 
           <div className="w-full rounded-md border border-status-amber/50 bg-status-amber/10 px-3 py-1.5 text-center lg:w-auto">
-            <span className="animate-pulseGlow font-display text-xs font-bold uppercase tracking-[0.22em] text-status-amber">
+            <span className="animate-pulseGlow font-display text-xs font-bold uppercase tracking-[0.12em] text-status-amber">
               ⚠ Simulation — Not Live Data
             </span>
           </div>
@@ -95,7 +95,7 @@ export default function TestBenchPage() {
       </main>
 
       <footer className="border-t border-status-amber/30 bg-base-bg/95 px-4 py-3 text-center sm:px-6">
-        <p className="text-[10px] uppercase tracking-[0.2em] text-status-amber/70">
+        <p className="text-[10px] uppercase tracking-[0.11em] text-status-amber/70">
           Every number on this page is simulated · nothing here is recorded as a flight
         </p>
       </footer>

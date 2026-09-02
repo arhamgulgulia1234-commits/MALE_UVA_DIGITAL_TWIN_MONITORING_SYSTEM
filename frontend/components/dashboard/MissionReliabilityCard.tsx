@@ -19,9 +19,9 @@ const TONE: Record<Recommendation, "go" | "caution" | "nogo"> = {
 };
 
 const BAR_COLOR: Record<Recommendation, string> = {
-  GO: "#22d3a8",
-  CAUTION: "#f5a623",
-  "NO-GO": "#ef4a5f",
+  GO: "#37af92",
+  CAUTION: "#d59834",
+  "NO-GO": "#da6978",
 };
 
 export function MissionReliabilityCard() {

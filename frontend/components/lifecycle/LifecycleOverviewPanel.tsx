@@ -20,9 +20,9 @@ import { FAULT_CATALOG } from "@/lib/types";
 import type { FaultType } from "@/lib/types";
 
 function conditionColor(score: number): string {
-  if (score >= 85) return "#22d3a8";
-  if (score >= 60) return "#f5a623";
-  return "#ef4a5f";
+  if (score >= 85) return "#37af92";
+  if (score >= 60) return "#d59834";
+  return "#da6978";
 }
 
 function wearToCondition(wear: number): number {
@@ -98,7 +98,7 @@ export function LifecycleOverviewPanel() {
             >
               {Math.round(overallCondition)}
             </span>
-            <span className="mt-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">
+            <span className="mt-1 text-[10px] uppercase tracking-[0.11em] text-slate-500">
               Condition
             </span>
           </RadialGauge>
