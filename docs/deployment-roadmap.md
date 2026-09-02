@@ -172,27 +172,57 @@ ids. Getting from that to an operational squadron needs:
 
 ## Security: from demo token to defence-grade
 
-`app/core/security.py` implements a single shared bearer token, disabled by default. It is
-deliberately minimal and is **not** presented as adequate for deployment. Its real value is
-structural: every control mutation and the telemetry socket already pass through one choke
-point, so the work below is contained rather than a rewrite.
+`app/auth/` replaced the old Phase 3 single shared bearer token: real accounts, short-lived
+JWTs (`app/auth/jwt_lite.py`, HS256, stdlib only), three roles enforced per-endpoint
+(`app/auth/deps.py`), and an append-only audit log (`app/db/models.py::AuditLogEntry`,
+queried via `GET /audit-log`, administrator only). It is still **not** presented as
+defence-grade — the row below explains exactly what is still missing and why.
 
-What a real deployment needs:
+### Seeded accounts
+
+Three demo accounts are seeded once, on first startup (`app/auth/seed.py`), if the `users`
+table is empty. **Never rotate these into the frontend** — they exist only for a human to
+type into the login screen or `curl`.
+
+| Username | Password | Role |
+|---|---|---|
+| `operator1` | `operator-demo-pw` | `operator` — view everything, start/end missions, apply presets |
+| `engineer1` | `engineer-demo-pw` | `maintenance_engineer` — operator + lifecycle maintenance actions |
+| `admin1` | `admin-demo-pw` | `administrator` — all of the above + fault injection + `GET /audit-log` |
+
+Override before any non-local deployment via `SEED_OPERATOR_PASSWORD`,
+`SEED_ENGINEER_PASSWORD`, `SEED_ADMIN_PASSWORD` (read once, at the first-ever startup —
+changing them after the table is seeded does nothing; rotate via the database directly).
+`JWT_SECRET` must also be overridden — the checked-in default is deliberately labelled
+insecure and is only for a from-scratch local run.
+
+### DEMO_MODE
+
+`DEMO_MODE=true` (default) — fault-injection endpoints (`POST /control/fault`,
+`POST /control/sensor-fault`) work for the `administrator` role. `DEMO_MODE=false` disables
+both endpoints outright, for every role, before the role check even runs — see
+`app/auth/deps.py::require_demo_mode`. This is a training/demo posture, not a permission:
+injecting a fault into a real engine has no business case outside training, so it is a
+deployment-wide kill switch, independent of who is asking. A real, non-simulated deployment
+sets `DEMO_MODE=false` and never unsets it.
+
+### What is still missing for defence-grade
 
 | Concern | Today | Required |
 |---|---|---|
 | Transport | Plain WS/HTTP, CORS-limited | mTLS, pinned CA, no plaintext fallback |
-| Identity | One shared secret | Per-airframe and per-operator certificates |
-| Authorisation | All-or-nothing | Role separation — observers cannot inject faults or command |
-| Token handling | `?token=` accepted on the WS handshake (browsers cannot set headers) | Short-lived ticket issued over the authenticated REST channel; query strings land in logs |
+| Identity | Username/password, one shared JWT secret | Per-airframe and per-operator certificates |
+| Authorisation | Role separation (operator / maintenance_engineer / administrator), enforced per-endpoint | The same, plus per-airframe scoping — an operator cleared for UAV-01 should not command UAV-02 |
+| Token handling | `?token=` accepted on the WS handshake (browsers cannot set headers); short-lived (60 min default) | Same short-lived-ticket approach, but issued over mTLS so the query string is never exposed on an untrusted link |
 | Integrity | None | Signed telemetry frames so a recording cannot be silently altered |
-| Key management | Env var | HSM or secure element, scheduled rotation, revocation |
-| Audit | Application logs | Tamper-evident log of every command, with operator identity |
-| Command path | Control endpoints mutate the sim | On a real vehicle these must not exist, or must be hard-gated — the PHM system is an observer, and a compromised PHM system must not be able to command an engine |
+| Key management | Env var (`JWT_SECRET`), no rotation | HSM or secure element, scheduled rotation, revocation |
+| Audit | Append-only `audit_log` table, `GET /audit-log` (administrator only) | The same, plus tamper-evidence (hash-chained rows or a write-once store) |
+| Command path | `DEMO_MODE` disables fault injection outside training; every other control endpoint still mutates the sim | On a real vehicle the non-fault-injection control surface (throttle, presets, setpoint) either disappears or is restricted to a ground test mode that is physically incapable of reaching a flying vehicle |
 
-That last row is the important one. Fault injection is a simulation affordance. On real
-hardware the control surface either disappears or is restricted to a ground test mode that
-is physically incapable of reaching a flying vehicle.
+The command-path row is still the important one. Role separation and `DEMO_MODE` remove
+fault injection from a real deployment's attack surface, but the rest of `/control/*` (mission
+start/end, presets, setpoint) still assumes it is talking to a simulation, not a flight-critical
+bus.
 
 ---
 

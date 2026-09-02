@@ -138,20 +138,17 @@ session. To keep missions, attach a Render persistent disk mounted at `/app/data
 or point `DATABASE_URL` at a managed Postgres — the repository layer is plain SQLAlchemy
 and the only SQLite-specific code is the PRAGMA block in `app/db/session.py`.
 
-## Optional: turn on auth
+## Auth
 
-On Render:
+Real accounts + JWT now, not a shared token (`app/auth/`) — every session requires a
+login, and the JWT never touches a public bundle. On Render, set:
 
 ```
-TELEMETRY_AUTH_ENABLED=true
-TELEMETRY_TOKEN=<a long random string>
+JWT_SECRET=<a long random string, not the dev default>
+DEMO_MODE=false   # a real deployment: fault injection stays off for every role
 ```
 
-On Vercel add `NEXT_PUBLIC_TELEMETRY_TOKEN` with the same value, then redeploy.
-
-Be clear-eyed about what this is: a shared secret compiled into a public JavaScript
-bundle. Anyone who opens DevTools can read it. It keeps casual traffic off a public demo
-and nothing more — `docs/deployment-roadmap.md` sets out what real authentication needs.
+Seeded demo credentials and the role/audit model are in `docs/deployment-roadmap.md`.
 
 ## Cost note
 

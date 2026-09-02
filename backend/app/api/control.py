@@ -12,9 +12,9 @@ It selects which UAV's `SimulationLoop`/`ReplayEngine` the route acts on via
 `request.app.state.fleet.get(uav_id)` — the route bodies are otherwise unchanged from
 Phase 1-4.
 
-Every route here mutates one UAV's SimulationLoop, and every route is guarded by
-`require_token` — one choke point for authentication, so hardening it later is a contained
-change (see app/core/security.py and docs/deployment-roadmap.md).
+Every route here mutates one UAV's SimulationLoop and requires a valid session (any
+role) via `get_current_user`; `/fault` and `/sensor-fault` additionally require the
+administrator role and DEMO_MODE — see app/auth/deps.py and docs/deployment-roadmap.md.
 """
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 
+from app.auth.audit import record
+from app.auth.deps import CurrentUser, get_current_user, require_demo_mode, require_role
 from app.core import mission_presets
 from app.core.compute_budget import heavy_compute_slot
 from app.core.fleet_registry import FleetRegistry, lifecycle_engine_id
@@ -42,16 +44,21 @@ from app.core.models import (
     ThrottleRequest,
     TimeScaleRequest,
 )
-from app.core.security import require_token
 from app.core.uav_ids import DEFAULT_UAV_ID
 from app.db.lifecycle_repository import lifecycle_repository
+from app.db.models import ROLE_ADMINISTRATOR
 from app.db.repository import repository
 from app.ml.mission_report import build_mission_report
 from app.sim.mission_profiles import SCENARIOS
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/control", dependencies=[Depends(require_token)])
+router = APIRouter(prefix="/control", dependencies=[Depends(get_current_user)])
+
+#: Fault injection needs both the administrator role and DEMO_MODE — two independent
+#: gates, stacked as separate dependencies rather than one combined check, so each
+#: fails with its own clear 403 reason instead of a generic "not permitted."
+_require_fault_injection = [Depends(require_role(ROLE_ADMINISTRATOR)), Depends(require_demo_mode)]
 
 
 def _fleet(request: Request) -> FleetRegistry:
@@ -68,12 +75,16 @@ def _entry(request: Request, uav_id: str):
 # ---- Phase 1/2 controls -----------------------------------------------------
 
 
-@router.post("/fault")
+@router.post("/fault", dependencies=_require_fault_injection)
 async def inject_fault(
-    req: FaultInjectRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+    req: FaultInjectRequest,
+    request: Request,
+    uav_id: str = DEFAULT_UAV_ID,
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     sim = _entry(request, uav_id).sim
     sim.inject_fault(req.type, req.severity, req.ramp_seconds)
+    record(user, "fault.inject", {"uav_id": uav_id, "type": req.type, "severity": req.severity})
 
     # Log the event against the active mission, if one is recording.
     mission_id = getattr(sim, "active_mission_id", None)
@@ -104,13 +115,17 @@ async def inject_fault(
 
 @router.post("/clear-fault")
 async def clear_fault(
-    req: ClearFaultRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+    req: ClearFaultRequest,
+    request: Request,
+    uav_id: str = DEFAULT_UAV_ID,
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     sim = _entry(request, uav_id).sim
     sim.clear_fault(req.fault_type)
     mission_id = getattr(sim, "active_mission_id", None)
     if mission_id is not None:
         repository.close_fault_event(mission_id, req.fault_type, time.time())
+    record(user, "fault.clear", {"uav_id": uav_id, "fault_type": req.fault_type})
     return {"ok": True, "cleared": req.fault_type}
 
 
@@ -144,9 +159,12 @@ async def jump_phase(
 # ---- Phase 3: sensor faults -------------------------------------------------
 
 
-@router.post("/sensor-fault")
+@router.post("/sensor-fault", dependencies=_require_fault_injection)
 async def inject_sensor_fault(
-    req: SensorFaultRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+    req: SensorFaultRequest,
+    request: Request,
+    uav_id: str = DEFAULT_UAV_ID,
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Corrupt what an instrument *reports*, leaving the engine physically healthy."""
     sim = _entry(request, uav_id).sim
@@ -164,6 +182,7 @@ async def inject_sensor_fault(
             is_sensor_fault=True,
             predicted_source="sensor_fault",
         )
+    record(user, "sensor_fault.inject", {"uav_id": uav_id, "type": req.type, "severity": req.severity})
 
     return {
         "ok": True,
@@ -229,7 +248,10 @@ async def apply_scenario(
 
 @router.post("/mission/start")
 async def start_mission(
-    req: MissionStartRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+    req: MissionStartRequest,
+    request: Request,
+    uav_id: str = DEFAULT_UAV_ID,
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Begin recording. Telemetry streams live either way; persistence only happens
     inside an explicit mission session.
@@ -268,6 +290,7 @@ async def start_mission(
         # length would.
         sim.mission_start_sim_time_s = sim.sim_time_s
 
+    record(user, "mission.start", {"uav_id": uav_id, "mission_id": mission_id, "profile_name": req.profile_name})
     return {
         "ok": True,
         "uav_id": uav_id,
@@ -278,7 +301,9 @@ async def start_mission(
 
 
 @router.post("/mission/end")
-async def end_mission(request: Request, uav_id: str = DEFAULT_UAV_ID) -> dict:
+async def end_mission(
+    request: Request, uav_id: str = DEFAULT_UAV_ID, user: CurrentUser = Depends(get_current_user)
+) -> dict:
     sim = _entry(request, uav_id).sim
     mission_id = getattr(sim, "active_mission_id", None)
     if mission_id is None:
@@ -287,6 +312,7 @@ async def end_mission(request: Request, uav_id: str = DEFAULT_UAV_ID) -> dict:
     # Stop recording first, so the report is built over a stable frame set.
     sim.active_mission_id = None
     repository.flush()
+    record(user, "mission.end", {"uav_id": uav_id, "mission_id": mission_id})
 
     mission = repository.get_mission(mission_id) or {"id": mission_id}
     frames = repository.get_mission_frames(mission_id)
@@ -466,7 +492,10 @@ async def list_presets() -> dict:
 
 @router.post("/apply-preset")
 async def apply_preset(
-    req: ApplyPresetRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
+    req: ApplyPresetRequest,
+    request: Request,
+    uav_id: str = DEFAULT_UAV_ID,
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Feed a preset's setpoint into the live simulation's manual-override mechanism."""
     sim = _entry(request, uav_id).sim
@@ -489,6 +518,7 @@ async def apply_preset(
         injection_timing_trim_deg=setpoint["injection_timing_trim_deg"],
     )
     logger.info("Applied preset '%s' to the live engine: %s", req.preset_name, applied)
+    record(user, "preset.apply", {"uav_id": uav_id, "preset_name": req.preset_name})
     return {"ok": True, "preset_name": req.preset_name, "setpoint": applied}
 
 

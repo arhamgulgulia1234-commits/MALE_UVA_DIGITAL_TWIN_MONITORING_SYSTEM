@@ -806,7 +806,7 @@ only, per the brief's "at least one representative fault."
 | `app/api/twin_diagnostics.py` | `/twin/diagnosis` — residuals and classifier output |
 | `app/api/health.py` | `/health` liveness |
 | `scripts/validate_physics.py` | Headless mission + fault, and the throttle-transient scenario; writes validation plots; **Phase 7** — `--scenario early-warning`, the real lead-time measurement |
-| `app/core/security.py` | Bearer-token guard for `/control/*` and the telemetry socket |
+| `app/auth/` | Real accounts, JWT sessions, role-based access control (`deps.py`), audit log (`audit.py`) |
 | `app/core/engine_params.py` | Every tunable constant, including all Phase 3 additions |
 | `app/db/models.py` | SQLAlchemy tables: missions, telemetry_frames (JSON), fault_events |
 | `app/db/session.py` | SQLite engine, WAL mode, `init_db()` on startup |

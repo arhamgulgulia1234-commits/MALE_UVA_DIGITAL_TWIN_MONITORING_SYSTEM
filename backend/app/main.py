@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api import (
+    audit,
     control,
     fleet,
     health,
@@ -33,10 +34,11 @@ from app.api import (
     twin_diagnostics,
     ws_telemetry,
 )
+from app.auth.router import router as auth_router
+from app.auth.seed import seed_default_users
 from app.core.compute_budget import tune_interpreter
 from app.core.config import settings
 from app.core.fleet_registry import build_default_fleet
-from app.core.security import auth_enabled
 from app.db.repository import repository
 from app.db.session import init_db
 from app.sim.simulation_loop import run_simulation
@@ -66,13 +68,14 @@ async def _run_mock(app: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    seed_default_users()
     logger.info("Database ready.")
     tune_interpreter()
 
-    if auth_enabled():
-        logger.info("Telemetry auth ENABLED (bearer token required).")
-    else:
-        logger.info("Telemetry auth disabled — set TELEMETRY_AUTH_ENABLED=true to enforce.")
+    logger.info(
+        "JWT auth active on /control/*, /ws/telemetry, /ws/fleet-overview. DEMO_MODE=%s.",
+        settings.demo_mode,
+    )
 
     # Phase 6: app.state.fleet is the source of truth — one FleetEntry (SimulationLoop
     # + ReplayEngine) per UAV. app.state.sim stays as a backward-compat alias pointing
@@ -156,6 +159,8 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(auth_router)
+app.include_router(audit.router)
 app.include_router(control.router)
 app.include_router(twin_diagnostics.router)
 app.include_router(ws_telemetry.router)
