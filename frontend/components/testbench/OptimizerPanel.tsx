@@ -51,7 +51,7 @@ function DeltaTile({
   const negative = value < -0.05;
   return (
     <div className="rounded-lg border border-base-border/70 bg-base-panel2/40 px-3 py-2.5">
-      <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
+      <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
         {label}
       </span>
       <span
@@ -62,9 +62,9 @@ function DeltaTile({
       >
         {value > 0 ? "+" : ""}
         {value.toFixed(1)}
-        <span className="ml-0.5 text-sm font-normal text-slate-500">{suffix}</span>
+        <span className="ml-0.5 text-sm font-normal text-slate-400">{suffix}</span>
       </span>
-      {sub && <span className="mt-1 block text-[10px] text-slate-600">{sub}</span>}
+      {sub && <span className="mt-1 block text-[10px] text-slate-400">{sub}</span>}
     </div>
   );
 }
@@ -111,12 +111,12 @@ function SetpointColumn({
       <dl className="space-y-0.5">
         {rows.map(([k, v]) => (
           <div key={k} className="flex justify-between text-[11px]">
-            <dt className="text-slate-500">{k}</dt>
+            <dt className="text-slate-400">{k}</dt>
             <dd className="tabular text-slate-200">{v}</dd>
           </div>
         ))}
       </dl>
-      {note && <p className="mt-2 text-[10px] leading-relaxed text-slate-600">{note}</p>}
+      {note && <p className="mt-2 text-[10px] leading-relaxed text-slate-400">{note}</p>}
     </div>
   );
 }
@@ -136,7 +136,7 @@ function SafetyRow({ check }: { check: SafetyCheck }) {
       <span className="tabular ml-auto text-slate-200">
         {check.value.toFixed(0)} {check.unit}
       </span>
-      <span className="tabular w-24 text-right text-slate-500">
+      <span className="tabular w-24 text-right text-slate-400">
         {check.direction === "max" ? "max" : "min"} {check.limit.toFixed(0)} ·{" "}
         <span className={check.ok ? "text-status-go" : "text-status-red"}>
           {check.margin >= 0 ? "+" : ""}
@@ -173,13 +173,13 @@ export function OptimizerPanel() {
       {/* ---- inputs ---- */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <label className="block sm:col-span-2">
-          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
+          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
             Objective
           </span>
           <select
             value={draft.objective}
             onChange={(e) => patch({ objective: e.target.value as OptimizerObjective })}
-            className="w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-cyan/60"
+            className="w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
           >
             {OBJECTIVES.map((o) => (
               <option key={o} value={o}>
@@ -187,14 +187,14 @@ export function OptimizerPanel() {
               </option>
             ))}
           </select>
-          <span className="mt-1 block text-[10px] text-slate-600">
+          <span className="mt-1 block text-[10px] text-slate-400">
             {OBJECTIVE_HINT[draft.objective]}
           </span>
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
-            Altitude <span className="normal-case tracking-normal text-slate-600">(m)</span>
+          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
+            Altitude <span className="normal-case tracking-normal text-slate-400">(m)</span>
           </span>
           <input
             type="number"
@@ -203,13 +203,13 @@ export function OptimizerPanel() {
             max={envelope?.altitude_m.max ?? 8000}
             step={100}
             onChange={(e) => patch({ altitude_m: Number(e.target.value) })}
-            className="tabular w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-cyan/60"
+            className="tabular w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
           />
         </label>
 
         <div>
-          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
-            Ambient <span className="normal-case tracking-normal text-slate-600">(°C)</span>
+          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
+            Ambient <span className="normal-case tracking-normal text-slate-400">(°C)</span>
           </span>
           <div className="flex gap-1.5">
             <input
@@ -218,7 +218,7 @@ export function OptimizerPanel() {
               placeholder="ISA"
               value={standardDay ? "" : draft.ambient_temperature_c ?? 0}
               onChange={(e) => patch({ ambient_temperature_c: Number(e.target.value) })}
-              className="tabular w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-cyan/60 disabled:opacity-40"
+              className="tabular w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan disabled:opacity-40"
             />
             <button
               type="button"
@@ -245,7 +245,7 @@ export function OptimizerPanel() {
             className="h-3.5 w-3.5 accent-status-cyan"
           />
           Use current engine health
-          <span className="text-slate-600">
+          <span className="text-slate-400">
             (optimise for the live engine&rsquo;s actual wear, not a pristine one)
           </span>
         </label>
@@ -358,7 +358,7 @@ export function OptimizerPanel() {
               ))}
             </ul>
             {result.health.severity_index > 0 && (
-              <p className="mt-2 text-[10px] leading-relaxed text-slate-600">
+              <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
                 Limits shown are derated for {(result.health.severity_index * 100).toFixed(0)}%
                 accumulated wear ({Object.entries(result.health.faults)
                   .map(([k, v]) => `${k.replace(/_/g, " ")} ${(v * 100).toFixed(0)}%`)
@@ -369,7 +369,7 @@ export function OptimizerPanel() {
             )}
           </div>
 
-          <ul className="space-y-0.5 text-[10px] text-slate-600">
+          <ul className="space-y-0.5 text-[10px] text-slate-400">
             {result.notes.map((n) => (
               <li key={n}>· {n}</li>
             ))}

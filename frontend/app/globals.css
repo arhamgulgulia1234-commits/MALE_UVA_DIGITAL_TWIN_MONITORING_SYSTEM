@@ -50,6 +50,13 @@ body {
   .tabular {
     @apply font-mono tabular-nums;
   }
+
+  /* The one page-width/padding token every route's header + <main> uses — no
+     page-specific max-w/px overrides, so content never shifts horizontally when the
+     persistent nav (components/layout/AppNav.tsx) hands off to page content. */
+  .page-container {
+    @apply mx-auto w-full max-w-[1800px] px-4 sm:px-6;
+  }
 }
 
 @layer utilities {

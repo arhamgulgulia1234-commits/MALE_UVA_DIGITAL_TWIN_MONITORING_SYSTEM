@@ -23,19 +23,23 @@ interface StatusPillProps {
 export function StatusPill({ tone, children, className }: StatusPillProps) {
   return (
     <span
+      role="status"
       className={clsx(
         "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] font-medium uppercase tracking-wider",
         toneClass[tone],
         className
       )}
     >
-      <span className={clsx("h-1.5 w-1.5 rounded-full", {
-        "bg-status-go": tone === "go",
-        "bg-status-amber": tone === "caution",
-        "bg-status-red": tone === "nogo",
-        "bg-status-idle": tone === "idle",
-        "bg-status-cyan": tone === "cyan",
-      })} />
+      <span
+        aria-hidden="true"
+        className={clsx("h-1.5 w-1.5 rounded-full", {
+          "bg-status-go": tone === "go",
+          "bg-status-amber": tone === "caution",
+          "bg-status-red": tone === "nogo",
+          "bg-status-idle": tone === "idle",
+          "bg-status-cyan": tone === "cyan",
+        })}
+      />
       {children}
     </span>
   );

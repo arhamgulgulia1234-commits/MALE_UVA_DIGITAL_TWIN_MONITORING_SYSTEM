@@ -8,6 +8,7 @@
  */
 import { create } from "zustand";
 import { useFleetStore } from "../fleet/store";
+import { toastError } from "../toast/store";
 import {
   TestBenchError,
   applyPreset,
@@ -272,6 +273,7 @@ export const useTestBenchStore = create<TestBenchStore>((set, get) => ({
       set({ runs: res.runs, runsLoading: false });
     } catch {
       set({ runsLoading: false });
+      toastError("Could not load scenario history")();
     }
   },
 

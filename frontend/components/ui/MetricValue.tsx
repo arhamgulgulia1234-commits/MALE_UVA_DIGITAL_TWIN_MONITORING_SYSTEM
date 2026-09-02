@@ -26,7 +26,7 @@ export function MetricValue({ value, unit, size = "md", tone = "normal", classNa
   return (
     <span className={clsx("tabular font-semibold leading-none", sizeClass[size], toneClass[tone], className)}>
       {value}
-      {unit && <span className="ml-1 text-[0.5em] font-normal text-slate-500">{unit}</span>}
+      {unit && <span className="ml-1 text-[0.5em] font-normal text-slate-400">{unit}</span>}
     </span>
   );
 }

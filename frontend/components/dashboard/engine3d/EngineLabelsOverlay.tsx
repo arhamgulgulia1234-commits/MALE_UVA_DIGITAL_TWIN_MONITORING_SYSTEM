@@ -306,9 +306,20 @@ export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean })
             return (
               <div
                 key={c.key}
+                role="button"
+                tabIndex={0}
+                aria-label={`Inspect ${part.displayName}`}
                 onMouseEnter={() => setBoxHoverKey(c.key)}
                 onMouseLeave={() => setBoxHoverKey((k) => (k === c.key ? null : k))}
+                onFocus={() => setBoxHoverKey(c.key)}
+                onBlur={() => setBoxHoverKey((k) => (k === c.key ? null : k))}
                 onClick={() => select(c.partId)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    select(c.partId);
+                  }
+                }}
                 style={{
                   position: "absolute",
                   left: slot.x - LABEL_WIDTH / 2,
@@ -327,6 +338,8 @@ export function EngineLabelsOverlay({ showCallouts }: { showCallouts: boolean })
                   textAlign: "left",
                   pointerEvents: "auto",
                   cursor: "pointer",
+                  outline: hovered ? "2px solid #4ab9c6" : "none",
+                  outlineOffset: 2,
                   transition: "border-color 120ms",
                 }}
               >

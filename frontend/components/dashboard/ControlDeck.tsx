@@ -76,7 +76,7 @@ function FaultInjectRow({
         <span
           className={clsx(
             "tabular shrink-0 text-[10px]",
-            isActive ? severityTextTone(actualSeverity) : "text-slate-600"
+            isActive ? severityTextTone(actualSeverity) : "text-slate-400"
           )}
         >
           actual {Math.round((actualSeverity ?? 0) * 100)}%
@@ -105,14 +105,14 @@ function FaultInjectRow({
           title="Ramp time (s)"
           disabled={injectDisabled}
           onChange={(e) => onRampChange(Number(e.target.value))}
-          className="tabular w-11 shrink-0 rounded border border-base-border bg-base-panel2/60 px-1 py-0.5 text-[10px] text-slate-200 outline-none focus:border-status-cyan/60 disabled:opacity-40"
+          className="tabular w-11 shrink-0 rounded border border-base-border bg-base-panel2/60 px-1 py-0.5 text-[10px] text-slate-200 outline-none focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan disabled:opacity-40"
         />
         <button
           type="button"
           onClick={onInject}
           disabled={injectDisabled}
           title={injectDisabled ? "Fault injection unavailable (demo mode off, or not signed in as administrator)" : undefined}
-          className="shrink-0 rounded border border-status-cyan/50 bg-status-cyan/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-status-cyan transition-colors hover:bg-status-cyan/20 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-status-cyan/10"
+          className="shrink-0 rounded border border-status-cyan/50 bg-status-cyan/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-status-cyan transition-colors hover:bg-status-cyan/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-status-cyan/10"
         >
           {isActive ? "Update" : "Inject"}
         </button>
@@ -120,7 +120,7 @@ function FaultInjectRow({
           <button
             type="button"
             onClick={onClear}
-            className="shrink-0 rounded border border-status-red/40 px-1.5 py-0.5 font-mono text-[10px] uppercase text-status-red transition-colors hover:bg-status-red/15"
+            className="shrink-0 rounded border border-status-red/40 px-1.5 py-0.5 font-mono text-[10px] uppercase text-status-red transition-colors hover:bg-status-red/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
           >
             Clear
           </button>
@@ -186,13 +186,14 @@ export function ControlDeck() {
 
   return (
     <div className="sticky bottom-0 z-30 border-t border-base-border bg-base-bg">
-      <div className="mx-auto max-w-[1800px] px-4 py-2 sm:px-6">
+      <div className="page-container py-2">
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="mb-2 flex w-full items-center justify-between text-left"
+          className="mb-2 flex w-full items-center justify-between text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
+          aria-expanded={expanded}
         >
           <span className="panel-title">Control Deck</span>
-          <span className="text-[11px] text-slate-500">{expanded ? "Hide ▾" : "Show ▴"}</span>
+          <span className="text-[11px] text-slate-400">{expanded ? "Hide ▾" : "Show ▴"}</span>
         </button>
 
         {expanded && (
@@ -200,7 +201,7 @@ export function ControlDeck() {
             {/* Throttle */}
             <div className="glass-panel p-3">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-[10px] uppercase tracking-wider text-slate-500">Throttle</span>
+                <span className="text-[10px] uppercase tracking-wider text-slate-400">Throttle</span>
                 <span className="tabular text-sm text-status-cyan">{Math.round(throttleDisplay * 100)}%</span>
               </div>
               <input
@@ -216,7 +217,7 @@ export function ControlDeck() {
 
             {/* Time scale */}
             <div className="glass-panel p-3">
-              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
+              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-400">
                 Time Acceleration
               </span>
               <div className="flex gap-2">
@@ -239,7 +240,7 @@ export function ControlDeck() {
 
             {/* Phase jump */}
             <div className="glass-panel p-3">
-              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
+              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-400">
                 Mission Phase
               </span>
               <div className="grid grid-cols-2 gap-2">
@@ -262,11 +263,11 @@ export function ControlDeck() {
 
             {/* Fault injection grid */}
             <div className="glass-panel p-3">
-              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
+              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-400">
                 Fault Injection · engine
               </span>
               {!canInjectFaults && (
-                <p className="mb-2 rounded-md border border-base-border/70 bg-base-panel2/40 px-2 py-1.5 text-[10px] text-slate-500">
+                <p className="mb-2 rounded-md border border-base-border/70 bg-base-panel2/40 px-2 py-1.5 text-[10px] text-slate-400">
                   {!demoMode
                     ? "Disabled — DEMO_MODE is off (real-deployment posture)."
                     : "Administrator role required to inject faults."}
@@ -301,7 +302,7 @@ export function ControlDeck() {
                 they are a different kind of thing — these corrupt the *reading*, not the
                 machine, and the whole point of the demo is that the operator can tell. */}
             <div className="glass-panel p-3">
-              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
+              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-400">
                 Sensor Faults · instrumentation only
               </span>
               <div className="grid grid-cols-2 gap-2">
@@ -348,7 +349,7 @@ export function ControlDeck() {
 
             {/* Environment */}
             <div className="glass-panel p-3">
-              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
+              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-400">
                 Environment
               </span>
               <div className="grid grid-cols-3 gap-2">
@@ -367,7 +368,7 @@ export function ControlDeck() {
                 ))}
               </div>
               {latest?.ambient_temperature_c != null && (
-                <p className="mt-2 tabular text-[10px] text-slate-500">
+                <p className="mt-2 tabular text-[10px] text-slate-400">
                   ambient {latest.ambient_temperature_c.toFixed(1)}°C
                   {latest.injection_timing_deg != null && (
                     <> · timing {latest.injection_timing_deg.toFixed(1)}° BTDC</>

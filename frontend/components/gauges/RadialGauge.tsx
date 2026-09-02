@@ -14,6 +14,9 @@ interface RadialGaugeProps {
   showTicks?: boolean;
   /** Opt-in glowing needle-tip marker that tracks the same spring as the arc fill. */
   needleMarker?: boolean;
+  /** Screen-reader label, e.g. "Engine health score: 92 of 100" — the SVG itself is
+   * decorative (aria-hidden); without this a gauge announces as nothing at all. */
+  label?: string;
 }
 
 const TICK_VALUES = [0, 25, 50, 75, 100];
@@ -27,6 +30,7 @@ export function RadialGauge({
   children,
   showTicks = false,
   needleMarker = false,
+  label,
 }: RadialGaugeProps) {
   const center = size / 2;
   const radius = (size - strokeWidth) / 2;
@@ -47,8 +51,12 @@ export function RadialGauge({
   const markerY = useTransform(markerAngleRad, (a) => center + radius * Math.sin(a));
 
   return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
+    <div
+      className="relative"
+      style={{ width: size, height: size }}
+      {...(label ? { role: "img", "aria-label": label } : {})}
+    >
+      <svg width={size} height={size} className="-rotate-90" aria-hidden="true">
         <circle
           cx={center}
           cy={center}

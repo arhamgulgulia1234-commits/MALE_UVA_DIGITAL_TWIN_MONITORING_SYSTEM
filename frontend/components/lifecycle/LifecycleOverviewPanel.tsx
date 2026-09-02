@@ -84,26 +84,32 @@ export function LifecycleOverviewPanel() {
       bodyClassName="space-y-5 p-5"
     >
       {error && (
-        <p className="text-xs text-status-red">
-          {error.message} — is the backend running?
+        <p role="alert" className="text-xs text-status-red">
+          {error.status === 0 ? `${error.message} — is the backend running?` : error.message}
         </p>
       )}
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[auto_1fr]">
         <div className="flex flex-col items-center gap-3">
-          <RadialGauge value={overallCondition} size={168} strokeWidth={12} color={conditionColor(overallCondition)}>
+          <RadialGauge
+            value={overallCondition}
+            size={168}
+            strokeWidth={12}
+            color={conditionColor(overallCondition)}
+            label={`Overall engine condition: ${Math.round(overallCondition)} of 100`}
+          >
             <span
               className="tabular text-4xl font-bold"
               style={{ color: conditionColor(overallCondition) }}
             >
               {Math.round(overallCondition)}
             </span>
-            <span className="mt-1 text-[10px] uppercase tracking-[0.11em] text-slate-500">
+            <span className="mt-1 text-[10px] uppercase tracking-[0.11em] text-slate-400">
               Condition
             </span>
           </RadialGauge>
           {worstLabel && (
-            <p className="max-w-[180px] text-center text-[10px] text-slate-500">
+            <p className="max-w-[180px] text-center text-[10px] text-slate-400">
               Limited by <span className="text-slate-300">{worstLabel}</span>
             </p>
           )}
@@ -111,7 +117,7 @@ export function LifecycleOverviewPanel() {
             <span className="tabular block text-2xl font-semibold text-slate-100">
               {loading && !summary ? "—" : formatHours(summary?.total_operating_hours ?? 0)}
             </span>
-            <span className="block text-[10px] uppercase tracking-wider text-slate-500">
+            <span className="block text-[10px] uppercase tracking-wider text-slate-400">
               Total operating hours
             </span>
           </div>
@@ -119,7 +125,7 @@ export function LifecycleOverviewPanel() {
 
         <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
           {rows.length === 0 && loading && (
-            <p className="col-span-2 py-6 text-center text-xs text-slate-500">
+            <p className="col-span-2 py-6 text-center text-xs text-slate-400">
               Loading wear state…
             </p>
           )}

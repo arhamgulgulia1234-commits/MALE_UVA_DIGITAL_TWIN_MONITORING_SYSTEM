@@ -83,13 +83,13 @@ export function LogMaintenanceActionForm() {
     >
       <form onSubmit={onSubmit} className="space-y-3">
         <label className="block">
-          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
+          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
             Fault type
           </span>
           <select
             value={faultType}
             onChange={(e) => onFaultTypeChange(e.target.value as FaultType)}
-            className="w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-go/60"
+            className="w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-go/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-go"
           >
             {FAULT_CATALOG.map((meta) => (
               <option key={meta.type} value={meta.type}>
@@ -100,7 +100,7 @@ export function LogMaintenanceActionForm() {
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
+          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
             Description
           </span>
           <input
@@ -109,13 +109,13 @@ export function LogMaintenanceActionForm() {
             onChange={(e) => setDescription(e.target.value)}
             maxLength={500}
             placeholder="What was done"
-            className="w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-go/60"
+            className="w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-go/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-go"
           />
         </label>
 
         <div>
           <div className="mb-1 flex items-baseline justify-between">
-            <span className="text-[10px] uppercase tracking-wider text-slate-500">
+            <span className="text-[10px] uppercase tracking-wider text-slate-400">
               Wear to clear
             </span>
             <span className="tabular text-sm text-status-go">
@@ -135,11 +135,11 @@ export function LogMaintenanceActionForm() {
 
         <div className="rounded-lg border border-base-border/70 bg-base-panel2/40 px-3 py-2.5">
           <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-500">Wear before</span>
+            <span className="text-slate-400">Wear before</span>
             <span className="tabular text-slate-300">{(currentWear * 100).toFixed(0)}%</span>
           </div>
           <div className="mt-1 flex items-center justify-between text-xs">
-            <span className="text-slate-500">Wear after this action</span>
+            <span className="text-slate-400">Wear after this action</span>
             <span className="tabular font-semibold text-status-go">
               {(afterWear * 100).toFixed(0)}%
             </span>
@@ -161,7 +161,7 @@ export function LogMaintenanceActionForm() {
           className={clsx(
             "w-full rounded-md border px-3 py-2 text-sm font-medium transition-colors",
             submitting
-              ? "cursor-not-allowed border-base-border text-slate-600"
+              ? "cursor-not-allowed border-base-border text-slate-400"
               : "border-status-go/50 bg-status-go/10 text-status-go hover:bg-status-go/20"
           )}
         >

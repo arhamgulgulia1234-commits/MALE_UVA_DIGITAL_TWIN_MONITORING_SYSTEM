@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
+import { SkeletonRows } from "@/components/ui/Skeleton";
 import { API_URL } from "@/lib/testbench/api";
 import { getAuthToken } from "@/lib/auth/store";
 import { formatTimeHHMMSS } from "@/lib/format";
@@ -56,18 +57,21 @@ export function AuditLogView() {
       bodyClassName="p-0"
     >
       {error && (
-        <p className="p-4 text-[11px] text-status-red">{error}</p>
+        <p role="alert" className="p-4 text-[11px] text-status-red">
+          {error}
+        </p>
       )}
-      {!error && (
+      {!error && loading && entries.length === 0 && <SkeletonRows rows={6} className="p-3" />}
+      {!error && !(loading && entries.length === 0) && (
         <div className="max-h-[600px] overflow-y-auto">
-          <table className="w-full border-collapse text-xs">
+          <table className="w-full border-collapse text-xs" aria-label="Audit log entries">
             <thead className="sticky top-0 bg-base-panel">
-              <tr className="border-b border-base-border/70 text-[10px] uppercase tracking-wide text-slate-500">
-                <th className="px-3 py-2 text-left font-medium">Time</th>
-                <th className="px-3 py-2 text-left font-medium">User</th>
-                <th className="px-3 py-2 text-left font-medium">Role</th>
-                <th className="px-3 py-2 text-left font-medium">Action</th>
-                <th className="px-3 py-2 text-left font-medium">Parameters</th>
+              <tr className="border-b border-base-border/70 text-[10px] uppercase tracking-wide text-slate-400">
+                <th scope="col" className="px-3 py-2 text-left font-medium">Time</th>
+                <th scope="col" className="px-3 py-2 text-left font-medium">User</th>
+                <th scope="col" className="px-3 py-2 text-left font-medium">Role</th>
+                <th scope="col" className="px-3 py-2 text-left font-medium">Action</th>
+                <th scope="col" className="px-3 py-2 text-left font-medium">Parameters</th>
               </tr>
             </thead>
             <tbody>
@@ -77,17 +81,18 @@ export function AuditLogView() {
                     {formatTimeHHMMSS(new Date(e.timestamp).getTime() / 1000)}
                   </td>
                   <td className="px-3 py-1.5 text-slate-200">{e.username}</td>
-                  <td className="px-3 py-1.5 text-slate-500">{e.role}</td>
+                  <td className="px-3 py-1.5 text-slate-400">{e.role}</td>
                   <td className="px-3 py-1.5 font-medium text-status-cyan">{e.action}</td>
-                  <td className="tabular px-3 py-1.5 text-slate-500">
+                  <td className="tabular px-3 py-1.5 text-slate-400">
                     {Object.keys(e.parameters).length > 0 ? JSON.stringify(e.parameters) : "—"}
                   </td>
                 </tr>
               ))}
-              {!loading && entries.length === 0 && (
+              {entries.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-slate-500">
-                    No actions recorded yet.
+                  <td colSpan={5} className="px-3 py-8 text-center text-slate-400">
+                    No actions recorded yet. Fault injection, preset changes, maintenance
+                    actions, mission start/end and logins will appear here as they happen.
                   </td>
                 </tr>
               )}
@@ -95,7 +100,7 @@ export function AuditLogView() {
           </table>
         </div>
       )}
-      <div className="flex items-center justify-between border-t border-base-border/70 px-3 py-2 text-[11px] text-slate-500">
+      <div className="flex items-center justify-between border-t border-base-border/70 px-3 py-2 text-[11px] text-slate-400">
         <span>
           {total > 0 ? `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} of ${total}` : "—"}
         </span>
@@ -104,7 +109,7 @@ export function AuditLogView() {
             type="button"
             disabled={offset === 0}
             onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-            className="rounded-md border border-base-border px-2 py-1 uppercase tracking-wide text-slate-400 transition-colors hover:border-status-cyan/40 disabled:opacity-30"
+            className="rounded-md border border-base-border px-2 py-1 uppercase tracking-wide text-slate-400 transition-colors hover:border-status-cyan/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-status-cyan disabled:opacity-30"
           >
             Prev
           </button>
@@ -112,7 +117,7 @@ export function AuditLogView() {
             type="button"
             disabled={offset + PAGE_SIZE >= total}
             onClick={() => setOffset((o) => o + PAGE_SIZE)}
-            className="rounded-md border border-base-border px-2 py-1 uppercase tracking-wide text-slate-400 transition-colors hover:border-status-cyan/40 disabled:opacity-30"
+            className="rounded-md border border-base-border px-2 py-1 uppercase tracking-wide text-slate-400 transition-colors hover:border-status-cyan/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-status-cyan disabled:opacity-30"
           >
             Next
           </button>

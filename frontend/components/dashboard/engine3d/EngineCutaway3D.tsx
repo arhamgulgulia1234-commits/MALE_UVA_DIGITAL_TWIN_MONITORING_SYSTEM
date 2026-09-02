@@ -127,7 +127,7 @@ export function EngineCutaway3D() {
             </button>
           )}
           {!selectedPart && mode === "full" && (
-            <div className="pointer-events-none absolute bottom-3 right-3 font-mono text-[9px] text-slate-600">
+            <div className="pointer-events-none absolute bottom-3 right-3 font-mono text-[9px] text-slate-400">
               click a part to inspect
             </div>
           )}
@@ -362,7 +362,7 @@ function ViewModeToggle({
             "rounded-md px-2 py-1 font-mono text-[10px] transition-colors",
             mode === value
               ? "bg-status-cyan/15 text-status-cyan"
-              : "text-slate-500 hover:text-slate-300"
+              : "text-slate-400 hover:text-slate-300"
           )}
         >
           {label}

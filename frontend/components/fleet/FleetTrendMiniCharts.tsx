@@ -54,7 +54,7 @@ export function FleetTrendMiniCharts() {
         return (
           <GlassCard key={uavId} title={`${uavId} — Health Trend`} glow="none" bodyClassName="p-3">
             {!trend || trend.points.length === 0 ? (
-              <p className="py-6 text-center text-[11px] text-slate-500">
+              <p className="py-6 text-center text-[11px] text-slate-400">
                 {trend ? "No completed missions yet" : "Loading…"}
               </p>
             ) : (

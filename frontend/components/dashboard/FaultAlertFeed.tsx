@@ -122,6 +122,7 @@ function FeedItem({ entry, meta, tone, displaySeverity, detail }: FeedItemProps)
         />
       )}
       <span
+        aria-hidden="true"
         className={clsx("h-2 w-2 shrink-0 rounded-full", {
           "bg-status-red": tone === "nogo",
           "bg-status-amber": tone === "caution",
@@ -131,11 +132,11 @@ function FeedItem({ entry, meta, tone, displaySeverity, detail }: FeedItemProps)
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className="truncate font-medium text-slate-200">{meta?.label ?? entry.type}</span>
-          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
             {entry.event === "cleared" ? "cleared" : "detected"}
           </span>
         </div>
-        <p className="truncate text-[11px] text-slate-500">{meta?.description}</p>
+        <p className="truncate text-[11px] text-slate-400">{meta?.description}</p>
         {detail && <p className="truncate text-[10px] text-status-cyan">{detail}</p>}
       </div>
       <div className="shrink-0 text-right">
@@ -144,7 +145,7 @@ function FeedItem({ entry, meta, tone, displaySeverity, detail }: FeedItemProps)
             {Math.round(displaySeverity * 100)}%
           </span>
         )}
-        <p className="tabular text-[10px] text-slate-500">{formatTimeHHMMSS(entry.timestamp)}</p>
+        <p className="tabular text-[10px] text-slate-400">{formatTimeHHMMSS(entry.timestamp)}</p>
       </div>
     </motion.li>
   );
@@ -197,11 +198,11 @@ export function FaultAlertFeed() {
     <GlassCard title="Fault Alert Feed" subtitle="Newest first · live severity" glow="cyan" bodyClassName="p-0">
       <div className="max-h-[320px] overflow-y-auto p-3">
         {feed.length === 0 && (
-          <p className="px-2 py-8 text-center text-xs text-slate-500">
+          <p className="px-2 py-8 text-center text-xs text-slate-400">
             No faults recorded this session — nominal.
           </p>
         )}
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-2" aria-live="polite" aria-label="Fault detection feed">
           <AnimatePresence initial={false}>
             {feed.map((entry) => {
               const meta =

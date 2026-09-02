@@ -253,7 +253,7 @@ function ReadoutStat({
 }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-[0.08em] text-slate-500">{label}</div>
+      <div className="text-[10px] uppercase tracking-[0.08em] text-slate-400">{label}</div>
       <div className={`font-display text-xl font-bold ${tone}`}>{value}</div>
     </div>
   );
@@ -327,7 +327,7 @@ export function FleetFormation3D({
           <fog attach="fog" args={["#0a0e14", 6, 13]} />
           <Scene onSelect={onSelect} />
         </Canvas>
-        <div className="pointer-events-none absolute bottom-2 right-3 font-mono text-[9px] text-slate-600">
+        <div className="pointer-events-none absolute bottom-2 right-3 font-mono text-[9px] text-slate-400">
           click a UAV to open its dashboard
         </div>
       </div>

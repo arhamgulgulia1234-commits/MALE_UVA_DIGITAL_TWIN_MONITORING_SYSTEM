@@ -123,8 +123,8 @@ export function MissionHeader() {
   const conn = CONN_LABEL[status];
 
   return (
-    <header className="sticky top-0 z-30 border-b border-base-border bg-base-bg">
-      <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
+    <header className="border-b border-base-border bg-base-bg">
+      <div className="page-container flex flex-wrap items-center gap-4 py-3">
         <div className="flex items-center gap-3">
           <img
             src={EMBLEM_PATH}
@@ -138,7 +138,7 @@ export function MissionHeader() {
                 {TAGLINE}
               </span>
             </h1>
-            <p className="text-[11px] text-slate-500">MALE UAV Piston Engine PHM — Mock Telemetry</p>
+            <p className="text-[11px] text-slate-400">MALE UAV Piston Engine PHM — Mock Telemetry</p>
           </div>
         </div>
 
@@ -147,11 +147,11 @@ export function MissionHeader() {
             engine. Living in the header rather than each page means switching UAVs
             once follows the operator to every view instead of resetting per page. */}
         <label className="flex items-center gap-1.5 text-[11px]">
-          <span className="font-medium uppercase tracking-[0.08em] text-slate-500">UAV</span>
+          <span className="font-medium uppercase tracking-[0.08em] text-slate-400">UAV</span>
           <select
             value={selectedUavId}
             onChange={(e) => setSelectedUavId(e.target.value)}
-            className="rounded-md border border-base-border bg-base-panel px-2 py-1 font-display text-xs font-semibold text-slate-200 outline-none focus:border-status-cyan/60"
+            className="rounded-md border border-base-border bg-base-panel px-2 py-1 font-display text-xs font-semibold text-slate-200 outline-none focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
           >
             {UAV_IDS.map((id) => (
               <option key={id} value={id}>
@@ -163,7 +163,7 @@ export function MissionHeader() {
 
         <div className="ml-auto flex items-center gap-4 sm:gap-6">
           <div className="hidden flex-col items-end sm:flex">
-            <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
+            <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
               Mission Clock
             </span>
             <span className="tabular text-lg font-medium leading-tight text-slate-200">
@@ -172,7 +172,7 @@ export function MissionHeader() {
           </div>
 
           <div className="hidden flex-col items-end md:flex">
-            <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
+            <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
               Phase
             </span>
             <span className="font-display text-lg font-semibold leading-tight text-status-cyan">
@@ -187,9 +187,9 @@ export function MissionHeader() {
             </span>
           )}
 
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span className={clsx("h-1.5 w-1.5 rounded-full", conn.tone.replace("text-", "bg-"))} />
-            <span className={conn.tone}>{conn.label}</span>
+          <div className="flex items-center gap-1.5 text-[11px]" role="status">
+            <span aria-hidden="true" className={clsx("h-1.5 w-1.5 rounded-full", conn.tone.replace("text-", "bg-"))} />
+            <span className={conn.tone}>Telemetry: {conn.label}</span>
           </div>
 
           <AnimatePresence mode="wait">
@@ -208,6 +208,9 @@ export function MissionHeader() {
                 style.pulse && "animate-pulseGlow"
               )}
               title="Mission reliability — can it finish the rest of the planned mission?"
+              role="status"
+              aria-live="polite"
+              aria-label={`Mission reliability: ${recommendation}`}
             >
               {recommendation}
             </motion.div>
@@ -235,8 +238,11 @@ export function MissionHeader() {
                 recoveryStyle.pulse && "animate-pulseGlow"
               )}
               title="Recovery reliability — can it safely get back to base if we abort right now?"
+              role="status"
+              aria-live="polite"
+              aria-label={`Recovery reliability: ${recoveryRecommendation}`}
             >
-              <recoveryStyle.icon className="h-3.5 w-3.5 shrink-0" />
+              <recoveryStyle.icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
               {recoveryRecommendation}
             </motion.div>
           </AnimatePresence>

@@ -53,34 +53,43 @@ export function BatteryAlternatorTile() {
 
   return (
     <div
+      role="status"
+      aria-label={`Bus voltage: ${battery != null ? smoothedBattery.toFixed(1) : "no reading"} volts${status !== "normal" ? `, ${status}` : ""}`}
       className={clsx(
         "glass-panel flex flex-col gap-2 border p-3 transition-colors duration-500",
         toneBorder[status]
       )}
     >
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
+        <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
           Bus Voltage
         </span>
-        {battery != null && (
-          <span
-            className={clsx(
-              "text-[9px] font-medium uppercase tracking-wide",
-              charging ? "text-status-go" : "text-status-amber"
-            )}
-          >
-            {charging ? "chg" : "dis"}
-          </span>
-        )}
+        <span className="flex items-center gap-1">
+          {status !== "normal" && (
+            <span className={clsx("text-[9px] font-bold uppercase tracking-wide", toneText[status])}>
+              {status === "critical" ? "Critical" : "Warn"}
+            </span>
+          )}
+          {battery != null && (
+            <span
+              className={clsx(
+                "text-[9px] font-medium uppercase tracking-wide",
+                charging ? "text-status-go" : "text-status-amber"
+              )}
+            >
+              {charging ? "chg" : "dis"}
+            </span>
+          )}
+        </span>
       </div>
 
       <div className="flex items-baseline gap-1">
         <span className={clsx("tabular text-2xl font-semibold leading-none", toneText[status])}>
           {battery != null ? smoothedBattery.toFixed(1) : "—"}
         </span>
-        <span className="text-[10px] text-slate-500">V</span>
+        <span className="text-[10px] text-slate-400">V</span>
         {alternator != null && (
-          <span className="ml-auto tabular text-[10px] text-slate-500">
+          <span className="ml-auto tabular text-[10px] text-slate-400">
             alt {alternator.toFixed(1)}V
           </span>
         )}

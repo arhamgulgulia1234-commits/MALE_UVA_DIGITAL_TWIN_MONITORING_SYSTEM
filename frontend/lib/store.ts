@@ -12,6 +12,7 @@
 import { create } from "zustand";
 import { getAuthToken } from "./auth/store";
 import { useFleetStore } from "./fleet/store";
+import { toastError } from "./toast/store";
 import type { ConnectionStatus } from "./websocket";
 import type {
   FaultType,
@@ -109,11 +110,13 @@ async function postJson<T = unknown>(
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      toastError(`${path} failed (${res.status}) — the operator can retry.`)();
+      return null;
+    }
     return (await res.json()) as T;
   } catch {
-    // control actions are best-effort for the live demo; a dropped POST just means
-    // the operator retries the button — no need to surface a toast/error state here.
+    toastError(`No response from ${path} — is the backend running?`)();
     return null;
   }
 }
@@ -121,9 +124,13 @@ async function postJson<T = unknown>(
 async function getJson<T = unknown>(path: string): Promise<T | null> {
   try {
     const res = await fetch(`${API_URL}${withUav(path)}`, { headers: authHeaders() });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      toastError(`${path} failed (${res.status})`)();
+      return null;
+    }
     return (await res.json()) as T;
   } catch {
+    toastError(`No response from ${path} — is the backend running?`)();
     return null;
   }
 }

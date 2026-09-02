@@ -6,6 +6,7 @@
  * rather than imported from there — this page is not part of the Test Bench and should
  * not need to pull in its store or its scenario/optimizer types to make one GET.
  */
+import { getAuthToken } from "../auth/store";
 import { useFleetStore } from "../fleet/store";
 import type {
   LifecycleSummary,
@@ -25,12 +26,11 @@ function resolveApiUrl(): string {
 
 export const API_URL = resolveApiUrl();
 
-const AUTH_TOKEN = process.env.NEXT_PUBLIC_TELEMETRY_TOKEN ?? "";
-
 function headers(): Record<string, string> {
+  const token = getAuthToken();
   return {
     "Content-Type": "application/json",
-    ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 

@@ -36,9 +36,9 @@ function NumberField({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
+      <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
         {label}
-        {unit && <span className="ml-1 normal-case tracking-normal text-slate-600">({unit})</span>}
+        {unit && <span className="ml-1 normal-case tracking-normal text-slate-400">({unit})</span>}
       </span>
       <input
         type="number"
@@ -47,9 +47,9 @@ function NumberField({
         max={max}
         step={step}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="tabular w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-cyan/60"
+        className="tabular w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
       />
-      {hint && <span className="mt-1 block text-[10px] text-slate-600">{hint}</span>}
+      {hint && <span className="mt-1 block text-[10px] text-slate-400">{hint}</span>}
     </label>
   );
 }
@@ -138,8 +138,8 @@ export function ScenarioBuilder() {
           }
         />
         <div>
-          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
-            Ambient Temp <span className="normal-case tracking-normal text-slate-600">(°C)</span>
+          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
+            Ambient Temp <span className="normal-case tracking-normal text-slate-400">(°C)</span>
           </span>
           <div className="flex gap-1.5">
             <input
@@ -149,7 +149,7 @@ export function ScenarioBuilder() {
               placeholder="ISA"
               step={1}
               onChange={(e) => patchDraft({ ambient_temperature_c: Number(e.target.value) })}
-              className="tabular w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-cyan/60 disabled:opacity-40"
+              className="tabular w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan disabled:opacity-40"
             />
             <button
               type="button"
@@ -171,7 +171,7 @@ export function ScenarioBuilder() {
               ISA
             </button>
           </div>
-          <span className="mt-1 block text-[10px] text-slate-600">
+          <span className="mt-1 block text-[10px] text-slate-400">
             {standardDay ? "Standard day for this altitude" : "Hot/cold day override"}
           </span>
         </div>
@@ -203,7 +203,7 @@ export function ScenarioBuilder() {
         {draft.throttle.mode === "constant" ? (
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-wider text-slate-500">Setting</span>
+              <span className="text-[10px] uppercase tracking-wider text-slate-400">Setting</span>
               <span className="tabular text-sm text-status-cyan">
                 {draft.throttle.constant_pct.toFixed(0)}%
               </span>
@@ -253,7 +253,7 @@ export function ScenarioBuilder() {
       <div className="space-y-2 rounded-lg border border-base-border/70 bg-base-panel2/30 p-3">
         <div className="flex items-baseline justify-between">
           <span className="panel-title">Pre-existing Wear</span>
-          <span className="text-[10px] text-slate-600">Condition at T+0</span>
+          <span className="text-[10px] text-slate-400">Condition at T+0</span>
         </div>
         <div className="grid max-h-64 grid-cols-1 gap-1.5 overflow-y-auto pr-1">
           {FAULT_CATALOG.map((fault) => {
@@ -283,7 +283,7 @@ export function ScenarioBuilder() {
                 <span
                   className={clsx(
                     "tabular w-9 shrink-0 text-right text-[11px]",
-                    value > 0.001 ? "text-status-amber" : "text-slate-600"
+                    value > 0.001 ? "text-status-amber" : "text-slate-400"
                   )}
                 >
                   {Math.round(value * 100)}%
@@ -298,7 +298,7 @@ export function ScenarioBuilder() {
       <div className="space-y-2.5 rounded-lg border border-base-border/70 bg-base-panel2/30 p-3">
         <div className="flex items-baseline justify-between">
           <span className="panel-title">Faults During Scenario</span>
-          <span className="text-[10px] text-slate-600">Develop mid-run</span>
+          <span className="text-[10px] text-slate-400">Develop mid-run</span>
         </div>
 
         {draft.scheduled_faults.length > 0 && (
@@ -314,12 +314,12 @@ export function ScenarioBuilder() {
                 <span className="tabular text-status-amber">
                   {Math.round(f.severity * 100)}% @ T+{f.at_time_min}min
                 </span>
-                <span className="tabular text-slate-500">ramp {f.ramp_minutes}min</span>
+                <span className="tabular text-slate-400">ramp {f.ramp_minutes}min</span>
                 <button
                   type="button"
                   onClick={() => removeScheduledFault(i)}
                   aria-label="Remove scheduled fault"
-                  className="rounded px-1 text-slate-500 hover:text-status-red"
+                  className="rounded px-1 text-slate-400 hover:text-status-red"
                 >
                   ✕
                 </button>
@@ -330,13 +330,13 @@ export function ScenarioBuilder() {
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           <label className="col-span-2 block">
-            <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
+            <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
               Fault
             </span>
             <select
               value={newFault.fault_type}
               onChange={(e) => setNewFault({ ...newFault, fault_type: e.target.value })}
-              className="w-full rounded-md border border-base-border bg-base-panel2/60 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-status-cyan/60"
+              className="w-full rounded-md border border-base-border bg-base-panel2/60 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
             >
               {FAULT_CATALOG.map((f: { type: FaultType; label: string }) => (
                 <option key={f.type} value={f.type}>
@@ -382,8 +382,8 @@ export function ScenarioBuilder() {
       {/* ---- label + run ---- */}
       <div className="space-y-3">
         <label className="block">
-          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
-            Label <span className="normal-case tracking-normal text-slate-600">(optional)</span>
+          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
+            Label <span className="normal-case tracking-normal text-slate-400">(optional)</span>
           </span>
           <input
             type="text"
@@ -391,7 +391,7 @@ export function ScenarioBuilder() {
             value={draft.label}
             placeholder="e.g. Hot-and-high climb with bearing wear"
             onChange={(e) => patchDraft({ label: e.target.value })}
-            className="w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-status-cyan/60"
+            className="w-full rounded-md border border-base-border bg-base-panel2/60 px-2.5 py-1.5 text-sm text-slate-100 outline-none placeholder:text-slate-400 focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
           />
         </label>
 
@@ -450,7 +450,7 @@ export function ScenarioBuilder() {
           </button>
         </div>
         {running && (
-          <p className="text-center text-[11px] text-slate-500">
+          <p className="text-center text-[11px] text-slate-400">
             Integrating the full physics stack headless — a long scenario takes a few
             seconds. Live telemetry is unaffected.
           </p>

@@ -17,8 +17,6 @@ import { SensorFusionPanel } from "@/components/dashboard/SensorFusionPanel";
 import { MissionReportView } from "@/components/dashboard/MissionReportView";
 import { ControlDeck } from "@/components/dashboard/ControlDeck";
 import { PerformanceMapViewer } from "@/components/dashboard/PerformanceMapViewer";
-// Phase 4: the only change to the live dashboard — a link across to the Test Bench.
-import { ModeNav } from "@/components/nav/ModeNav";
 // Phase 5: engine life-cycle — cumulative wear and hours across every mission this
 // engine has flown, not just the one currently on screen. Lives on this page rather
 // than a route of its own: it reads the same live-updating ledger every other panel
@@ -38,7 +36,7 @@ const EngineCutaway3D = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="glass-panel relative flex h-[340px] w-full items-center justify-center overflow-hidden text-xs text-slate-500">
+      <div className="glass-panel relative flex h-[340px] w-full items-center justify-center overflow-hidden text-xs text-slate-400">
         <img
           src={EMBLEM_PATH}
           alt=""
@@ -55,12 +53,10 @@ export default function Home() {
   useTelemetryStream();
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <>
       <MissionHeader />
 
-      <main className="mx-auto w-full max-w-[1800px] flex-1 space-y-6 px-4 py-6 sm:px-6">
-        <ModeNav className="w-fit" />
-
+      <main className="page-container flex-1 space-y-6 py-6">
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.4fr_0.9fr]">
           <HealthScoreGauge />
           <EngineCutaway3D />
@@ -117,6 +113,6 @@ export default function Home() {
 
       <ControlDeck />
       <MissionReportView />
-    </div>
+    </>
   );
 }

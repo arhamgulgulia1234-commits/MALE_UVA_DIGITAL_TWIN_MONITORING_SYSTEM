@@ -62,13 +62,13 @@ export function PartDetailPanel({
       <div className="flex items-start justify-between gap-2 border-b border-base-border px-2.5 py-1.5">
         <div>
           <div className="text-[11px] font-semibold text-slate-100">{part.displayName}</div>
-          <div className="font-mono text-[8px] uppercase tracking-[0.09em] text-slate-500">
+          <div className="font-mono text-[8px] uppercase tracking-[0.09em] text-slate-400">
             Part Inspector
           </div>
         </div>
         <button
           onClick={onClose}
-          className="-mr-1 -mt-0.5 rounded px-1.5 py-0.5 font-mono text-[13px] leading-none text-slate-500 transition-colors hover:text-slate-200"
+          className="-mr-1 -mt-0.5 rounded px-1.5 py-0.5 font-mono text-[13px] leading-none text-slate-400 transition-colors hover:text-slate-200"
           aria-label="Clear selection"
         >
           ×
@@ -79,7 +79,7 @@ export function PartDetailPanel({
         {/* --- subsystem health, first: it is the headline judgement ---- */}
         <section>
           <div className="mb-1 flex items-baseline justify-between">
-            <span className="font-mono text-[8px] uppercase tracking-[0.09em] text-slate-500">
+            <span className="font-mono text-[8px] uppercase tracking-[0.09em] text-slate-400">
               {SUBSYSTEM_LABEL[part.healthSubsystem] ?? part.healthSubsystem} index
             </span>
             <span
@@ -112,7 +112,7 @@ export function PartDetailPanel({
                 <span className="flex-1 truncate font-mono text-[9px] text-status-red">
                   {f.type}
                 </span>
-                <span className="tabular font-mono text-[9px] text-status-red/80">
+                <span className="tabular font-mono text-[9px] text-status-red">
                   {Math.round(f.severity * 100)}%
                 </span>
               </div>
@@ -122,7 +122,7 @@ export function PartDetailPanel({
 
         {/* --- live telemetry ------------------------------------------- */}
         <section>
-          <div className="mb-1 font-mono text-[8px] uppercase tracking-[0.09em] text-slate-500">
+          <div className="mb-1 font-mono text-[8px] uppercase tracking-[0.09em] text-slate-400">
             Live telemetry
           </div>
           <div className="space-y-0.5">
@@ -131,19 +131,19 @@ export function PartDetailPanel({
               const { value, unit } = formatTelemetryValue(path, raw);
               return (
                 <div key={path} className="flex items-baseline gap-1.5 text-[9px]">
-                  <span className="flex-1 truncate text-slate-500">
+                  <span className="flex-1 truncate text-slate-400">
                     {telemetryFieldLabel(path)}
                   </span>
                   <span
                     className={clsx(
                       "tabular font-mono text-[10px]",
-                      raw == null ? "text-slate-600" : "text-slate-200"
+                      raw == null ? "text-slate-400" : "text-slate-200"
                     )}
                   >
                     {value}
                   </span>
                   {unit && (
-                    <span className="w-7 shrink-0 font-mono text-[8px] text-slate-600">
+                    <span className="w-7 shrink-0 font-mono text-[8px] text-slate-400">
                       {unit}
                     </span>
                   )}
@@ -154,13 +154,13 @@ export function PartDetailPanel({
         </section>
 
         {activeFaults.length === 0 && (
-          <div className="flex items-center gap-1.5 text-[9px] text-slate-600">
+          <div className="flex items-center gap-1.5 text-[9px] text-slate-400">
             <span className="h-1.5 w-1.5 rounded-full bg-status-go" />
             No active fault on this part
           </div>
         )}
 
-        <p className="text-[9px] leading-[1.5] text-slate-500">{part.description}</p>
+        <p className="text-[9px] leading-[1.5] text-slate-400">{part.description}</p>
       </div>
 
       {/*
@@ -170,7 +170,7 @@ export function PartDetailPanel({
         anatomy lesson: it names the exact file that simulates the part you just clicked.
       */}
       <div className="border-t border-base-border px-2.5 py-1.5">
-        <div className="mb-1 font-mono text-[8px] uppercase tracking-[0.09em] text-slate-500">
+        <div className="mb-1 font-mono text-[8px] uppercase tracking-[0.09em] text-slate-400">
           Governed by
         </div>
         <code className="block break-all rounded border border-status-cyan/35 bg-status-cyan/10 px-1.5 py-1 font-mono text-[9px] leading-[1.4] text-status-cyan">
@@ -179,7 +179,7 @@ export function PartDetailPanel({
         {part.secondaryModules?.map((m) => (
           <code
             key={m}
-            className="mt-1 block break-all rounded border border-base-border bg-base-panel2/60 px-1.5 py-1 font-mono text-[9px] leading-[1.4] text-slate-500"
+            className="mt-1 block break-all rounded border border-base-border bg-base-panel2/60 px-1.5 py-1 font-mono text-[9px] leading-[1.4] text-slate-400"
           >
             {m}
           </code>

@@ -57,11 +57,11 @@ export function LoginScreen() {
           <h1 className="font-display text-lg font-bold tracking-wide text-slate-100">
             {PRODUCT_NAME}
           </h1>
-          <p className="mt-1 text-[11px] text-slate-500">Sign in to continue</p>
+          <p className="mt-1 text-[11px] text-slate-400">Sign in to continue</p>
         </div>
 
         <label className="block">
-          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
+          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
             Username
           </span>
           <input
@@ -71,12 +71,12 @@ export function LoginScreen() {
             autoComplete="username"
             autoFocus
             required
-            className="w-full rounded-md border border-base-border bg-base-panel2 px-3 py-2 text-sm text-slate-100 outline-none focus:border-status-cyan/60"
+            className="w-full rounded-md border border-base-border bg-base-panel2 px-3 py-2 text-sm text-slate-100 outline-none focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
           />
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
+          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
             Password
           </span>
           <input
@@ -85,7 +85,7 @@ export function LoginScreen() {
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
             required
-            className="w-full rounded-md border border-base-border bg-base-panel2 px-3 py-2 text-sm text-slate-100 outline-none focus:border-status-cyan/60"
+            className="w-full rounded-md border border-base-border bg-base-panel2 px-3 py-2 text-sm text-slate-100 outline-none focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
           />
         </label>
 

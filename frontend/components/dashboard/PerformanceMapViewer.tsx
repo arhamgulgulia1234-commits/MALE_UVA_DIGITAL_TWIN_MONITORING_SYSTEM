@@ -352,7 +352,7 @@ export function PerformanceMapViewer() {
       {/* ---- controls ---- */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[auto_1fr]">
         <div>
-          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
+          <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
             Metric
           </span>
           <div className="inline-flex rounded-md border border-base-border bg-base-panel2/60 p-0.5">
@@ -377,13 +377,13 @@ export function PerformanceMapViewer() {
 
         <div>
           <div className="mb-1 flex items-baseline justify-between gap-3">
-            <span className="text-[10px] uppercase tracking-wider text-slate-500">
+            <span className="text-[10px] uppercase tracking-wider text-slate-400">
               Altitude — maps shift with air density
             </span>
             <span className="tabular text-sm text-status-cyan">
               {altitudeInput.toLocaleString()} m
               {map && (
-                <span className="ml-2 text-[10px] text-slate-500">
+                <span className="ml-2 text-[10px] text-slate-400">
                   σ {map.conditions.density_ratio.toFixed(3)} ·{" "}
                   {map.conditions.ambient_pressure_kpa.toFixed(0)} kPa
                 </span>
@@ -631,7 +631,7 @@ export function PerformanceMapViewer() {
                         key={v.name}
                         className={clsx(
                           "flex justify-between gap-3 text-[10px]",
-                          v.name === metric ? "text-status-cyan" : "text-slate-500"
+                          v.name === metric ? "text-status-cyan" : "text-slate-400"
                         )}
                       >
                         <span>{v.label}</span>
@@ -648,10 +648,10 @@ export function PerformanceMapViewer() {
           {map && domain && (
             <div className="space-y-1.5">
               <div className="flex items-baseline justify-between gap-3">
-                <span className="text-[10px] uppercase tracking-wider text-slate-500">
+                <span className="text-[10px] uppercase tracking-wider text-slate-400">
                   {map.metric_label} ({map.unit})
                 </span>
-                <span className="text-[10px] text-slate-600">
+                <span className="text-[10px] text-slate-400">
                   {map.lower_is_better ? "bright = lower = better" : "bright = higher = better"}
                 </span>
               </div>
@@ -682,7 +682,7 @@ export function PerformanceMapViewer() {
                 })}
               </div>
               <div className="relative h-3">
-                <span className="tabular absolute left-0 text-[9px] text-slate-500">
+                <span className="tabular absolute left-0 text-[9px] text-slate-400">
                   {domain.lo.toFixed(map.unit === "g/kWh" ? 0 : 1)}
                 </span>
                 {legendTicks(levels).map((l) => {
@@ -691,19 +691,19 @@ export function PerformanceMapViewer() {
                   return (
                     <span
                       key={l}
-                      className="tabular absolute -translate-x-1/2 text-[9px] text-slate-500"
+                      className="tabular absolute -translate-x-1/2 text-[9px] text-slate-400"
                       style={{ left: `${pct}%` }}
                     >
                       {l.toFixed(map.unit === "g/kWh" ? 0 : 1)}
                     </span>
                   );
                 })}
-                <span className="tabular absolute right-0 text-[9px] text-slate-500">
+                <span className="tabular absolute right-0 text-[9px] text-slate-400">
                   {domain.clipped ? "≥ " : ""}
                   {domain.hi.toFixed(map.unit === "g/kWh" ? 0 : 1)}
                 </span>
               </div>
-              <p className="text-[10px] leading-relaxed text-slate-600">
+              <p className="text-[10px] leading-relaxed text-slate-400">
                 Iso-lines step evenly across this scale; the ticks label a few of them.{" "}
                 {map.description}
                 {domain.clipped &&
@@ -815,7 +815,7 @@ export function PerformanceMapViewer() {
           </div>
 
           {map && (
-            <p className="text-[10px] leading-relaxed text-slate-600">
+            <p className="text-[10px] leading-relaxed text-slate-400">
               {map.assumptions.join(" ")}
             </p>
           )}
@@ -847,7 +847,7 @@ function MarkerCard({
           : "border-base-border/70 bg-base-panel2/40"
       )}
     >
-      <span className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500">
+      <span className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-400">
         {swatch}
         {title}
       </span>
@@ -861,7 +861,7 @@ function MarkerCard({
             key={i}
             className={clsx(
               "tabular block leading-snug",
-              i === 0 ? "text-sm text-slate-200" : "text-[10px] text-slate-500"
+              i === 0 ? "text-sm text-slate-200" : "text-[10px] text-slate-400"
             )}
           >
             {line}

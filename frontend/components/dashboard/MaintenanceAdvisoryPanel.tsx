@@ -52,7 +52,7 @@ export function MaintenanceAdvisoryPanel() {
     >
       <div className="max-h-[320px] overflow-y-auto p-3">
         {advisories.length === 0 && (
-          <p className="px-2 py-8 text-center text-xs text-slate-500">
+          <p className="px-2 py-8 text-center text-xs text-slate-400">
             No maintenance action required — all subsystems nominal.
           </p>
         )}
@@ -98,7 +98,7 @@ export function MaintenanceAdvisoryPanel() {
                       {advisory.basis.map((b) => (
                         <span
                           key={b}
-                          className="rounded border border-base-border px-1.5 py-0.5 font-mono text-[9px] text-slate-500"
+                          className="rounded border border-base-border px-1.5 py-0.5 font-mono text-[9px] text-slate-400"
                         >
                           {b}
                         </span>

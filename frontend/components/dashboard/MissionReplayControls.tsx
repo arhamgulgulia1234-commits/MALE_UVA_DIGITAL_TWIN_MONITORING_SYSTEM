@@ -35,7 +35,7 @@ export function MissionReplayControls() {
 
   return (
     <div className="glass-panel p-3">
-      <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
+      <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-400">
         Mission Record / Replay
       </span>
 
@@ -61,7 +61,7 @@ export function MissionReplayControls() {
           onChange={(e) =>
             setSelected(e.target.value === "" ? "" : Number(e.target.value))
           }
-          className="w-full rounded-md border border-base-border bg-base-panel2 px-2 py-1.5 font-mono text-[11px] text-slate-300 outline-none focus:border-status-cyan/40"
+          className="w-full rounded-md border border-base-border bg-base-panel2 px-2 py-1.5 font-mono text-[11px] text-slate-300 outline-none focus:border-status-cyan/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
         >
           <option value="">Select recorded mission…</option>
           {missions.map((m) => (
@@ -95,7 +95,7 @@ export function MissionReplayControls() {
             className={clsx(
               "flex-1 rounded-md border px-2 py-1.5 font-mono text-[11px] font-medium transition-colors",
               selected === ""
-                ? "cursor-not-allowed border-base-border text-slate-600"
+                ? "cursor-not-allowed border-base-border text-slate-400"
                 : "border-status-cyan/50 bg-status-cyan/10 text-status-cyan hover:bg-status-cyan/20"
             )}
           >
@@ -108,7 +108,7 @@ export function MissionReplayControls() {
               "flex-1 rounded-md border px-2 py-1.5 font-mono text-[11px] font-medium transition-colors",
               isReplaying
                 ? "border-status-amber/50 bg-status-amber/10 text-status-amber"
-                : "cursor-not-allowed border-base-border text-slate-600"
+                : "cursor-not-allowed border-base-border text-slate-400"
             )}
           >
             ■ Live
@@ -121,7 +121,7 @@ export function MissionReplayControls() {
           className={clsx(
             "rounded-md border px-2 py-1.5 font-mono text-[11px] transition-colors",
             selected === ""
-              ? "cursor-not-allowed border-base-border text-slate-600"
+              ? "cursor-not-allowed border-base-border text-slate-400"
               : "border-base-border text-slate-400 hover:border-status-cyan/30"
           )}
         >
