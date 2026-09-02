@@ -113,7 +113,9 @@ class RULPredictor:
         #: acceptable when the news is getting better; it is not when it is getting worse.
         self.smoothing_tau_fall_s = smoothing_tau_fall_s
         self._history: dict[str, deque[tuple[float, float]]] = {}
-        self._smoothed: float | None = None
+        #: Held at `max_minutes` ("practically nominal") whenever no trend is fittable,
+        #: rather than `None` — see the gate-to-active handoff note in `update()` below.
+        self._smoothed: float = max_minutes
         self._last_time_s: float | None = None
         #: Early-warning smoothing state is per-subsystem (unlike `_smoothed` above, which
         #: tracks only the single worst-subsystem critical RUL) because more than one
@@ -123,7 +125,7 @@ class RULPredictor:
 
     def reset(self) -> None:
         self._history.clear()
-        self._smoothed = None
+        self._smoothed = self.max_minutes
         self._last_time_s = None
         self._warning_smoothed.clear()
         self._warning_last_time_s = None
@@ -154,23 +156,27 @@ class RULPredictor:
         self._last_time_s = sim_time_s
 
         if best is None:
-            self._smoothed = None
+            # No fittable trend right now — publish nothing (the dashboard shows a dash),
+            # but deliberately leave `self._smoothed` untouched rather than resetting it.
+            # It is the gate's *hold* value: whenever a trend next becomes fittable — the
+            # very first time ever (still sitting at `max_minutes` from __init__), or
+            # again after a noisy tick or a cleared fault re-develops — the EMA below
+            # resumes from here instead of jumping straight to a freshly-computed raw
+            # estimate. That seed-from-raw jump is what used to make the readout snap the
+            # instant the minimum-samples gate opened.
             return RULEstimate(None, None, "stable", 0.0)
 
         # Smooth the reported figure. The underlying least-squares fit is jumpy while a
         # fault is still ramping, and an RUL readout that leaps between 25 and 600 minutes
         # is worse than useless to an operator deciding whether to abort.
         raw = best.minutes if best.minutes is not None else 0.0
-        if self._smoothed is None:
-            self._smoothed = raw
-        else:
-            tau = (
-                self.smoothing_tau_s
-                if raw >= self._smoothed
-                else self.smoothing_tau_fall_s
-            )
-            alpha = 1.0 - math.exp(-dt_s / max(1e-6, tau))
-            self._smoothed += (raw - self._smoothed) * alpha
+        tau = (
+            self.smoothing_tau_s
+            if raw >= self._smoothed
+            else self.smoothing_tau_fall_s
+        )
+        alpha = 1.0 - math.exp(-dt_s / max(1e-6, tau))
+        self._smoothed += (raw - self._smoothed) * alpha
 
         return RULEstimate(
             minutes=max(0.0, self._smoothed),
