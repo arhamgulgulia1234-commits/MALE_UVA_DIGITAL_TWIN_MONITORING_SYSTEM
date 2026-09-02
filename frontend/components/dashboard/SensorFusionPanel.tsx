@@ -41,7 +41,7 @@ function verdictFor(absInnovation: number, threshold: number): Verdict {
 const VERDICT_STYLE: Record<Verdict, { text: string; dot: string; label: string }> = {
   ok: { text: "text-status-go", dot: "bg-status-go", label: "tracking" },
   suspect: { text: "text-status-red", dot: "bg-status-red", label: "suspect" },
-  unknown: { text: "text-slate-500", dot: "bg-status-idle", label: "—" },
+  unknown: { text: "text-slate-400", dot: "bg-status-idle", label: "—" },
 };
 
 function SourceRow({
@@ -69,7 +69,7 @@ function SourceRow({
           : "border-base-border/70 bg-base-panel2/30"
       )}
     >
-      <span className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", style.dot)} />
+      <span aria-hidden="true" className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", style.dot)} />
       <span className="w-28 shrink-0 text-slate-400">{label}</span>
       <span className="tabular flex-1 text-right font-medium text-slate-100">
         {value.toFixed(decimals)} {unit}
@@ -106,7 +106,7 @@ export function SensorFusionPanel() {
         glow="cyan"
         bodyClassName="p-4"
       >
-        <p className="py-6 text-center text-xs text-slate-500">Waiting for telemetry…</p>
+        <p className="py-6 text-center text-xs text-slate-400">Waiting for telemetry…</p>
       </GlassCard>
     );
   }
@@ -154,7 +154,7 @@ export function SensorFusionPanel() {
     >
       {/* ---- CHT ---- */}
       <div className="space-y-2">
-        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
           Cylinder Head Temp
         </h3>
         {chtPrimary !== null && chtInnovations && (
@@ -180,7 +180,7 @@ export function SensorFusionPanel() {
 
       {/* ---- RPM ---- */}
       <div className="space-y-2">
-        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
           Crankshaft Speed
         </h3>
         {tachRpm !== null && rpmInnovations && (
@@ -205,7 +205,7 @@ export function SensorFusionPanel() {
         )}
         {latest.fused_rpm != null && <FusedRow value={latest.fused_rpm} unit="rpm" decimals={0} />}
         {tachVerdict === "ok" && vibVerdict === "suspect" && (
-          <p className="text-[10px] leading-relaxed text-slate-600">
+          <p className="text-[10px] leading-relaxed text-slate-400">
             Vibration-derived RPM disagrees with the tachometer — check whether cylinder
             vibration RMS is independently elevated before blaming the sensor.
           </p>
@@ -214,7 +214,7 @@ export function SensorFusionPanel() {
 
       {/* ---- Oil pressure ---- */}
       <div className="space-y-2">
-        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
           Oil Pressure
         </h3>
         {oilSensorReading !== null && (
@@ -230,7 +230,7 @@ export function SensorFusionPanel() {
           <FusedRow value={latest.fused_oil_pressure_kpa} unit="kPa" />
         )}
         <div className="rounded-md border border-base-border/70 bg-base-panel2/30 px-2.5 py-2">
-          <div className="mb-1 flex items-center justify-between text-[10px] text-slate-500">
+          <div className="mb-1 flex items-center justify-between text-[10px] text-slate-400">
             <span>MODEL PREDICTION</span>
             <span>SENSOR</span>
           </div>
@@ -243,7 +243,7 @@ export function SensorFusionPanel() {
               style={{ width: `${Math.max(2, gain * 100)}%` }}
             />
           </div>
-          <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">
+          <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400">
             Kalman gain {gain.toFixed(2)}
             {trustingSensor
               ? " — trusting the sensor: the zero-wear model's own prediction confidence has degraded."

@@ -19,9 +19,9 @@ const TONE: Record<Recommendation, "go" | "caution" | "nogo"> = {
 };
 
 const BAR_COLOR: Record<Recommendation, string> = {
-  GO: "#22d3a8",
-  CAUTION: "#f5a623",
-  "NO-GO": "#ef4a5f",
+  GO: "#37af92",
+  CAUTION: "#d59834",
+  "NO-GO": "#da6978",
 };
 
 export function MissionReliabilityCard() {
@@ -42,10 +42,18 @@ export function MissionReliabilityCard() {
           </StatusPill>
         </div>
 
-        <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-base-border">
+        <div
+          className="relative h-2.5 w-full overflow-hidden rounded-full bg-base-border"
+          role="progressbar"
+          aria-label="Mission reliability score"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
           {[25, 50, 75].map((mark) => (
             <span
               key={mark}
+              aria-hidden="true"
               className="absolute inset-y-0 z-10 w-px bg-base-bg/60"
               style={{ left: `${mark}%` }}
             />
@@ -60,8 +68,8 @@ export function MissionReliabilityCard() {
 
         <p
           className={clsx(
-            "text-[11px] leading-relaxed text-slate-500",
-            rel.recommendation === "NO-GO" && "text-status-red/80",
+            "text-[11px] leading-relaxed text-slate-400",
+            rel.recommendation === "NO-GO" && "text-status-red",
             rel.recommendation === "CAUTION" && "text-status-amber/80"
           )}
         >

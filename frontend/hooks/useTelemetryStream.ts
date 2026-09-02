@@ -6,6 +6,7 @@
  * read telemetry from useTelemetryStore, not call this hook themselves.
  */
 import { useEffect } from "react";
+import { getAuthToken } from "@/lib/auth/store";
 import { ReconnectingSocket } from "@/lib/websocket";
 import { useTelemetryStore } from "@/lib/store";
 import { useFleetStore } from "@/lib/fleet/store";
@@ -14,22 +15,16 @@ import type { TelemetryFrame } from "@/lib/types";
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws/telemetry";
 
 /**
- * Auth token, when the backend has TELEMETRY_AUTH_ENABLED=true. Empty for the default
- * open-demo configuration, in which case the URL is left exactly as configured.
- */
-const AUTH_TOKEN = process.env.NEXT_PUBLIC_TELEMETRY_TOKEN ?? "";
-
-/**
  * A browser cannot set an Authorization header on a WebSocket handshake, so the backend
- * also accepts the token as a `?token=` query parameter (see app/core/security.py).
- * Without this the REST controls authenticate fine while the telemetry socket is closed
- * with 1008 on every attempt — the dashboard renders, the controls work, and the stream
- * sits in "reconnecting" forever with no indication that a token is the problem.
+ * also accepts the JWT as a `?token=` query parameter (see app/auth/deps.py::
+ * websocket_user). AuthGate only mounts the dashboard once a session token exists, so
+ * this always has one to attach by the time a socket actually opens.
  */
 function authorizedUrl(url: string): string {
-  if (!AUTH_TOKEN) return url;
+  const token = getAuthToken();
+  if (!token) return url;
   const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}token=${encodeURIComponent(AUTH_TOKEN)}`;
+  return `${url}${separator}token=${encodeURIComponent(token)}`;
 }
 
 /**

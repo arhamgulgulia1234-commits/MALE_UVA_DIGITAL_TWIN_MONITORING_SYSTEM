@@ -6,10 +6,10 @@ import { MultiLineChart, type SeriesDef } from "@/components/charts/MultiLineCha
 import { useTelemetryStore } from "@/lib/store";
 
 const ALL_SERIES: SeriesDef[] = [
-  { key: "egt_avg", color: "#ef4a5f", label: "Avg EGT (°C)", yAxisId: "left" },
-  { key: "cht", color: "#f5a623", label: "CHT (°C)", yAxisId: "left" },
+  { key: "egt_avg", color: "#da6978", label: "Avg EGT (°C)", yAxisId: "left" },
+  { key: "cht", color: "#d59834", label: "CHT (°C)", yAxisId: "left" },
   { key: "oil_temp", color: "#c084fc", label: "Oil Temp (°C)", yAxisId: "left" },
-  { key: "rpm", color: "#3fd0e0", label: "RPM", yAxisId: "right" },
+  { key: "rpm", color: "#4ab9c6", label: "RPM", yAxisId: "right" },
 ];
 
 export function TelemetryStrip() {
@@ -60,11 +60,8 @@ export function TelemetryStrip() {
                 style={{ opacity: isHidden ? 0.35 : 1 }}
               >
                 <span
-                  className="h-1.5 w-1.5 rounded-full transition-shadow duration-200"
-                  style={{
-                    background: s.color,
-                    boxShadow: isHidden ? "none" : `0 0 6px ${s.color}`,
-                  }}
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: s.color }}
                 />
                 <span className="text-slate-400">{s.label}</span>
               </button>

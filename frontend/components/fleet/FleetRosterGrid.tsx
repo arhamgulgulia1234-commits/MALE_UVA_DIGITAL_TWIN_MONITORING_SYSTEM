@@ -19,9 +19,9 @@ import { useFleetStore } from "@/lib/fleet/store";
 import type { FleetOverviewEntry } from "@/lib/fleet/types";
 
 function scoreColor(score: number): string {
-  if (score >= 85) return "#22d3a8";
-  if (score >= 60) return "#f5a623";
-  return "#ef4a5f";
+  if (score >= 85) return "#37af92";
+  if (score >= 60) return "#d59834";
+  return "#da6978";
 }
 
 const STATUS_LABEL: Record<FleetOverviewEntry["status"], string> = {
@@ -33,7 +33,7 @@ const STATUS_LABEL: Record<FleetOverviewEntry["status"], string> = {
 const STATUS_TONE: Record<FleetOverviewEntry["status"], string> = {
   live: "text-status-go",
   replay: "text-status-amber",
-  idle: "text-slate-500",
+  idle: "text-slate-400",
 };
 
 export function FleetRosterGrid({ roster }: { roster: FleetOverviewEntry[] }) {
@@ -79,7 +79,13 @@ export function FleetRosterGrid({ roster }: { roster: FleetOverviewEntry[] }) {
             </div>
 
             <div className="flex items-center gap-4">
-              <RadialGauge value={health} size={72} strokeWidth={7} color={color}>
+              <RadialGauge
+                value={health}
+                size={72}
+                strokeWidth={7}
+                color={color}
+                label={`${entry.uav_id} health score: ${Math.round(health)} of 100`}
+              >
                 <span className="tabular text-lg font-bold" style={{ color }}>
                   {Math.round(health)}
                 </span>

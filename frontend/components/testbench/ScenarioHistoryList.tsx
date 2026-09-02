@@ -72,11 +72,11 @@ export function ScenarioHistoryList() {
       bodyClassName="p-3"
     >
       {loading && runs.length === 0 && (
-        <p className="py-6 text-center text-xs text-slate-500">Loading…</p>
+        <p className="py-6 text-center text-xs text-slate-400">Loading…</p>
       )}
 
       {!loading && runs.length === 0 && (
-        <p className="py-6 text-center text-xs text-slate-500">
+        <p className="py-6 text-center text-xs text-slate-400">
           No scenarios run yet. Every run you execute is logged here — separately from the
           missions table, because these are hypothetical, not flown.
         </p>
@@ -103,14 +103,14 @@ export function ScenarioHistoryList() {
                   <p className="truncate text-[11px] font-medium text-slate-200">
                     {run.label || `Scenario #${run.id}`}
                   </p>
-                  <p className="tabular text-[10px] text-slate-500">{conditions(run)}</p>
+                  <p className="tabular text-[10px] text-slate-400">{conditions(run)}</p>
                 </div>
-                <span className="tabular shrink-0 text-[10px] text-slate-600">
+                <span className="tabular shrink-0 text-[10px] text-slate-400">
                   {formatWhen(run.created_at)}
                 </span>
               </div>
 
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-400">
                 <span>
                   Min health{" "}
                   <span className="tabular text-slate-300">
@@ -144,7 +144,7 @@ export function ScenarioHistoryList() {
                   <p className="text-[11px] leading-relaxed text-slate-300">
                     {selected.summary.headline}
                   </p>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-slate-500">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-slate-400">
                     <span>
                       Peak CHT{" "}
                       <span className="tabular text-slate-300">

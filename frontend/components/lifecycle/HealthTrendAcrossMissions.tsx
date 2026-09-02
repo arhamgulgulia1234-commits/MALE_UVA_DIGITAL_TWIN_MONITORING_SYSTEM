@@ -53,19 +53,19 @@ export function HealthTrendAcrossMissions() {
       bodyClassName="p-4"
     >
       {trend.length === 0 ? (
-        <p className="py-10 text-center text-xs text-slate-500">
+        <p className="py-10 text-center text-xs text-slate-400">
           {loading ? "Loading mission history…" : "No completed missions with a report yet."}
         </p>
       ) : (
         <>
           <MultiLineChart
             data={data}
-            series={[{ key: "health", color: "#3fd0e0", label: "Health score" }]}
+            series={[{ key: "health", color: "#4ab9c6", label: "Health score" }]}
             xKey="mission"
             xTickFormatter={(v) => `#${v}`}
             height={220}
           />
-          <div className="mt-2 flex justify-between text-[10px] text-slate-600">
+          <div className="mt-2 flex justify-between text-[10px] text-slate-400">
             <span>{formatWhen(trend[0]?.started_at ?? null)}</span>
             <span>{formatWhen(trend[trend.length - 1]?.ended_at ?? null)}</span>
           </div>

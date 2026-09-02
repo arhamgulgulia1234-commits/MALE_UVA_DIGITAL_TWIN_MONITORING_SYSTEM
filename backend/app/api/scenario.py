@@ -23,10 +23,10 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 
+from app.auth.deps import get_current_user
 from app.core.compute_budget import heavy_compute_slot
 from app.core.engine_params import PARAMS
 from app.core.models import ScenarioParamsRequest
-from app.core.security import require_token
 from app.db.repository import repository
 from app.physics.fault_models import FAULT_TYPES
 from app.sim.scenario_engine import (
@@ -146,7 +146,7 @@ def _excursion(e) -> dict:
     }
 
 
-@router.post("/scenario", dependencies=[Depends(require_token)])
+@router.post("/scenario", dependencies=[Depends(get_current_user)])
 async def simulate_scenario(req: ScenarioParamsRequest) -> dict:
     """Run one what-if scenario and return its time-series and summary."""
     params = _to_engine_params(req)

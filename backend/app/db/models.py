@@ -207,3 +207,45 @@ class MaintenanceAction(Base):
 
 
 Index("ix_maintenance_actions_engine", MaintenanceAction.engine_id, MaintenanceAction.performed_at)
+
+
+# ---- Auth: real accounts replacing the Phase 3 shared bearer token -----------------
+#
+# Three roles, each a strict superset of the one before: "operator" (view everything,
+# start/end missions, apply presets), "maintenance_engineer" (+ lifecycle maintenance
+# actions), "administrator" (+ fault injection + user management). Rank order matters —
+# app/auth/deps.py's `require_min_role` compares these positionally, not lexically.
+ROLE_OPERATOR = "operator"
+ROLE_MAINTENANCE_ENGINEER = "maintenance_engineer"
+ROLE_ADMINISTRATOR = "administrator"
+ROLES: tuple[str, ...] = (ROLE_OPERATOR, ROLE_MAINTENANCE_ENGINEER, ROLE_ADMINISTRATOR)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
+    #: PBKDF2-HMAC-SHA256, see app/auth/passwords.py — stdlib only, no bcrypt dependency.
+    hashed_password: Mapped[str] = mapped_column(String(200), nullable=False)
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class AuditLogEntry(Base):
+    """One row per control-affecting action: fault inject/clear, preset apply,
+    maintenance action, mission start/end, login. Written by app/auth/audit.py's
+    `record()`, never edited — an audit log that can be amended after the fact is not
+    an audit log."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    username: Mapped[str] = mapped_column(String(80), nullable=False)
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    action: Mapped[str] = mapped_column(String(80), nullable=False)
+    parameters: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+Index("ix_audit_log_timestamp", AuditLogEntry.timestamp)

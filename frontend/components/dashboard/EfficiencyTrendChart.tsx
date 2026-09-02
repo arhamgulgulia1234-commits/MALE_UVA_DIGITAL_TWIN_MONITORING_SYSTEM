@@ -8,8 +8,8 @@ import { useTelemetryStore } from "@/lib/store";
 import type { EfficiencyTrend } from "@/lib/types";
 
 const SERIES: SeriesDef[] = [
-  { key: "bsfc", color: "#3fd0e0", label: "BSFC (g/kWh)", yAxisId: "left" },
-  { key: "cov", color: "#f5a623", label: "COV(IMEP) %", yAxisId: "right" },
+  { key: "bsfc", color: "#4ab9c6", label: "BSFC (g/kWh)", yAxisId: "left" },
+  { key: "cov", color: "#d59834", label: "COV(IMEP) %", yAxisId: "right" },
 ];
 
 const TREND_STYLE: Record<EfficiencyTrend, { label: string; className: string }> = {
@@ -63,9 +63,9 @@ export function EfficiencyTrendChart() {
           <div className="text-right">
             <div className="tabular text-sm font-semibold text-slate-100">
               {bsfc != null ? bsfc.toFixed(0) : "—"}
-              <span className="ml-1 text-[10px] font-normal text-slate-500">g/kWh</span>
+              <span className="ml-1 text-[10px] font-normal text-slate-400">g/kWh</span>
             </div>
-            <div className="tabular text-[10px] text-slate-500">
+            <div className="tabular text-[10px] text-slate-400">
               COV {cov != null ? `${cov.toFixed(1)}%` : "—"}
             </div>
           </div>
@@ -83,7 +83,7 @@ export function EfficiencyTrendChart() {
       {data.length > 3 ? (
         <MultiLineChart data={data} series={SERIES} height={180} />
       ) : (
-        <div className="flex h-[180px] items-center justify-center text-xs text-slate-500">
+        <div className="flex h-[180px] items-center justify-center text-xs text-slate-400">
           Waiting for sustained power — BSFC is undefined at idle.
         </div>
       )}

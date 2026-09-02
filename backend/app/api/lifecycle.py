@@ -20,11 +20,13 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.auth.audit import record
+from app.auth.deps import CurrentUser, get_current_user, require_min_role
 from app.core.fleet_registry import lifecycle_engine_id
 from app.core.models import MaintenanceActionRequest
-from app.core.security import require_token
 from app.core.uav_ids import DEFAULT_UAV_ID
 from app.db.lifecycle_repository import lifecycle_repository
+from app.db.models import ROLE_MAINTENANCE_ENGINEER
 from app.db.repository import repository
 from app.physics.fault_models import FAULT_TYPES
 
@@ -65,7 +67,7 @@ def _mission_health_trend(uav_id: str) -> list[dict]:
     return trend
 
 
-@router.get("/summary")
+@router.get("/summary", dependencies=[Depends(get_current_user)])
 async def lifecycle_summary(uav_id: str = DEFAULT_UAV_ID) -> dict:
     """Total hours, current wear per fault type, cumulative fault-event counts, the
     health-score trend across mission history, and the maintenance log — for one UAV.
@@ -85,9 +87,14 @@ async def lifecycle_summary(uav_id: str = DEFAULT_UAV_ID) -> dict:
     }
 
 
-@router.post("/maintenance-action", dependencies=[Depends(require_token)])
+@router.post(
+    "/maintenance-action",
+    dependencies=[Depends(require_min_role(ROLE_MAINTENANCE_ENGINEER))],
+)
 async def log_maintenance_action(
-    req: MaintenanceActionRequest, uav_id: str = DEFAULT_UAV_ID
+    req: MaintenanceActionRequest,
+    uav_id: str = DEFAULT_UAV_ID,
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Record a maintenance action against the persisted wear ledger.
 
@@ -103,4 +110,9 @@ async def log_maintenance_action(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record(
+        user,
+        "maintenance_action",
+        {"uav_id": uav_id, "fault_type": req.fault_type, "reset_amount": req.reset_amount},
+    )
     return {"ok": True, "lifecycle": lifecycle}

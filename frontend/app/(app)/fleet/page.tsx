@@ -15,10 +15,10 @@
  */
 import { useEffect } from "react";
 import dynamic from "next/dynamic";
-import { ModeNav } from "@/components/nav/ModeNav";
 import { FleetSummaryHeader } from "@/components/fleet/FleetSummaryHeader";
 import { FleetRosterGrid } from "@/components/fleet/FleetRosterGrid";
 import { FleetTrendMiniCharts } from "@/components/fleet/FleetTrendMiniCharts";
+import { SkeletonRows } from "@/components/ui/Skeleton";
 import { useFleetStore } from "@/lib/fleet/store";
 
 const FleetFormation3D = dynamic(
@@ -26,7 +26,7 @@ const FleetFormation3D = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="glass-panel flex h-[340px] w-full items-center justify-center text-xs text-slate-500">
+      <div className="glass-panel flex h-[340px] w-full items-center justify-center text-xs text-slate-400">
         Loading fleet formation…
       </div>
     ),
@@ -46,9 +46,9 @@ export default function FleetPage() {
   }, []);
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-30 border-b border-base-border bg-base-bg/90 backdrop-blur">
-        <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
+    <>
+      <header className="border-b border-base-border bg-base-bg">
+        <div className="page-container flex flex-wrap items-center gap-4 py-3">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-status-cyan/40 bg-status-cyan/10">
               <span className="font-display text-sm font-bold text-status-cyan">FL</span>
@@ -57,18 +57,22 @@ export default function FleetPage() {
               <h1 className="font-display text-base font-bold tracking-wide text-slate-100 sm:text-lg">
                 Fleet Overview
               </h1>
-              <p className="text-[11px] text-slate-500">3 UAVs — ranked most urgent first</p>
+              <p className="text-[11px] text-slate-400">3 UAVs — ranked most urgent first</p>
             </div>
           </div>
-          <ModeNav className="ml-auto" />
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1800px] flex-1 space-y-6 px-4 py-6 sm:px-6">
+      <main className="page-container flex-1 space-y-6 py-6">
         {rankings.length === 0 ? (
-          <p className="py-16 text-center text-sm text-slate-500">
-            {rankingsLoading ? "Loading fleet…" : "No fleet data yet."}
-          </p>
+          rankingsLoading ? (
+            <SkeletonRows rows={3} />
+          ) : (
+            <p className="py-16 text-center text-sm text-slate-400">
+              No fleet data yet — the backend may still be starting up. This page polls
+              automatically and will populate once it responds.
+            </p>
+          )
         ) : (
           <>
             <FleetSummaryHeader roster={rankings} />
@@ -78,6 +82,6 @@ export default function FleetPage() {
           </>
         )}
       </main>
-    </div>
+    </>
   );
 }

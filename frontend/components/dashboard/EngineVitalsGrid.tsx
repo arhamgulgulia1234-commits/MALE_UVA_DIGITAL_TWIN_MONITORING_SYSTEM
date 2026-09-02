@@ -77,9 +77,9 @@ const toneText: Record<BandStatus, string> = {
 };
 
 const toneLine: Record<BandStatus, string> = {
-  normal: "#3fd0e0",
-  warn: "#f5a623",
-  critical: "#ef4a5f",
+  normal: "#4ab9c6",
+  warn: "#d59834",
+  critical: "#da6978",
 };
 
 function VitalTile({ def }: { def: VitalDef }) {
@@ -94,21 +94,28 @@ function VitalTile({ def }: { def: VitalDef }) {
 
   return (
     <div
+      role="status"
+      aria-label={`${def.label}: ${smoothed.toFixed(def.decimals)} ${def.unit}${status !== "normal" ? `, ${status}` : ""}`}
       className={clsx(
-        "glass-panel flex flex-col gap-2 border p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-shadow duration-500",
+        "glass-panel flex flex-col gap-2 border p-3 transition-colors duration-500",
         toneBorder[status]
       )}
     >
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">
+        <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
           {def.label}
         </span>
+        {status !== "normal" && (
+          <span className={clsx("text-[9px] font-bold uppercase tracking-wide", toneText[status])}>
+            {status === "critical" ? "Critical" : "Warn"}
+          </span>
+        )}
       </div>
       <div className="flex items-baseline gap-1">
         <span className={clsx("tabular text-2xl font-semibold leading-none", toneText[status])}>
           {smoothed.toFixed(def.decimals)}
         </span>
-        <span className="text-[10px] text-slate-500">{def.unit}</span>
+        <span className="text-[10px] text-slate-400">{def.unit}</span>
       </div>
       <Sparkline data={series.length ? series : [current]} color={toneLine[status]} height={30} />
     </div>

@@ -30,5 +30,18 @@ class Settings:
     #: Demo-safety escape hatch only — the real path is the physics model.
     use_mock: bool = _env_bool("USE_MOCK", False)
 
+    #: True (default) = training/demo posture: fault-injection endpoints work for
+    #: administrators. False = a real deployment posture: they are disabled outright,
+    #: for every role — see app/auth/deps.py::require_demo_mode. Injecting a fault into
+    #: a real engine has no business case outside training, so this is not a role check,
+    #: it is a hard kill switch independent of who is asking.
+    demo_mode: bool = _env_bool("DEMO_MODE", True)
+
+    #: HMAC secret for the JWTs app/auth/jwt_lite.py issues. The insecure default is
+    #: fine for the demo (see docs/deployment-roadmap.md) but must be overridden — a
+    #: real deployment's tokens are only as good as this secret.
+    jwt_secret: str = os.getenv("JWT_SECRET", "vayudrishti-dev-insecure-change-me")
+    jwt_expires_minutes: float = float(os.getenv("JWT_EXPIRES_MINUTES", "60"))
+
 
 settings = Settings()

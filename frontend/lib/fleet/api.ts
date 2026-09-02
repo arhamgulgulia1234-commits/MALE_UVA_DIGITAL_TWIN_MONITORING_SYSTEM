@@ -5,6 +5,7 @@
  * and consumed by the fleet roster page, not by anything already using the testbench or
  * lifecycle stores.
  */
+import { getAuthToken } from "../auth/store";
 import type { FleetOverviewEntry, FleetOverviewResponse } from "./types";
 
 function resolveApiUrl(): string {
@@ -19,10 +20,9 @@ function resolveApiUrl(): string {
 
 export const API_URL = resolveApiUrl();
 
-const AUTH_TOKEN = process.env.NEXT_PUBLIC_TELEMETRY_TOKEN ?? "";
-
 function headers(): Record<string, string> {
-  return AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {};
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 async function getJson<T>(path: string): Promise<T | null> {

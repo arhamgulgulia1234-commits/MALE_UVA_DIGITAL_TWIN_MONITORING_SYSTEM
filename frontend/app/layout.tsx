@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Rajdhani } from "next/font/google";
+import { AuthGate } from "@/components/auth/AuthGate";
 import { PRODUCT_NAME, TAGLINE } from "@/lib/branding";
 import "./globals.css";
 
@@ -30,7 +31,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${jetbrainsMono.variable} ${rajdhani.variable}`}>
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        <AuthGate>{children}</AuthGate>
+      </body>
     </html>
   );
 }

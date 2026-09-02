@@ -2,6 +2,7 @@
 
 import clsx from "clsx";
 import { useRef, useState } from "react";
+import { useAuthStore } from "@/lib/auth/store";
 import { useTelemetryStore } from "@/lib/store";
 import {
   FAULT_CATALOG,
@@ -28,8 +29,112 @@ function severityTone(s: number): string {
   return "border-status-cyan/50 bg-status-cyan/10 text-status-cyan";
 }
 
+function severityTextTone(s: number): string {
+  if (s >= 0.7) return "text-status-red";
+  if (s >= 0.35) return "text-status-amber";
+  return "text-status-cyan";
+}
+
+const DEFAULT_RAMP_SECONDS = 10;
+
+/** One fault type: target-severity slider + ramp time + Inject/Update + live actual
+ * readout from `active_faults[]`. Target defaults to 50% until touched; ramp defaults
+ * to a fast 10s so a demo doesn't wait around. */
+function FaultInjectRow({
+  label,
+  description,
+  targetPct,
+  rampSeconds,
+  actualSeverity,
+  injectDisabled,
+  onTargetChange,
+  onRampChange,
+  onInject,
+  onClear,
+}: {
+  label: string;
+  description: string;
+  targetPct: number;
+  rampSeconds: number;
+  actualSeverity: number | undefined;
+  injectDisabled: boolean;
+  onTargetChange: (pct: number) => void;
+  onRampChange: (seconds: number) => void;
+  onInject: () => void;
+  onClear: () => void;
+}) {
+  const isActive = actualSeverity !== undefined;
+  return (
+    <div className="rounded-md border border-base-border/70 bg-base-panel2/30 p-1.5">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span
+          className="truncate font-mono text-[11px] font-medium text-slate-300"
+          title={description}
+        >
+          {label}
+        </span>
+        <span
+          className={clsx(
+            "tabular shrink-0 text-[10px]",
+            isActive ? severityTextTone(actualSeverity) : "text-slate-400"
+          )}
+        >
+          actual {Math.round((actualSeverity ?? 0) * 100)}%
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={targetPct}
+          disabled={injectDisabled}
+          onChange={(e) => onTargetChange(Number(e.target.value))}
+          className="h-1 min-w-0 flex-1 accent-status-amber disabled:opacity-40"
+        />
+        <span className="tabular w-8 shrink-0 text-right text-[10px] text-slate-400">
+          {targetPct}%
+        </span>
+        <input
+          type="number"
+          min={0}
+          max={600}
+          step={1}
+          value={rampSeconds}
+          title="Ramp time (s)"
+          disabled={injectDisabled}
+          onChange={(e) => onRampChange(Number(e.target.value))}
+          className="tabular w-11 shrink-0 rounded border border-base-border bg-base-panel2/60 px-1 py-0.5 text-[10px] text-slate-200 outline-none focus:border-status-cyan/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan disabled:opacity-40"
+        />
+        <button
+          type="button"
+          onClick={onInject}
+          disabled={injectDisabled}
+          title={injectDisabled ? "Fault injection unavailable (demo mode off, or not signed in as administrator)" : undefined}
+          className="shrink-0 rounded border border-status-cyan/50 bg-status-cyan/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-status-cyan transition-colors hover:bg-status-cyan/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-status-cyan/10"
+        >
+          {isActive ? "Update" : "Inject"}
+        </button>
+        {isActive && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="shrink-0 rounded border border-status-red/40 px-1.5 py-0.5 font-mono text-[10px] uppercase text-status-red transition-colors hover:bg-status-red/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ControlDeck() {
-  const [expanded, setExpanded] = useState(true);
+  // Collapsed by default: expanded, this sticky-bottom panel now runs tall enough
+  // (per-fault severity rows, ramp inputs) to cover most of the viewport over the
+  // dashboard it docks against — starting collapsed puts telemetry in view first.
+  const [expanded, setExpanded] = useState(false);
   const throttle = useTelemetryStore((s) => s.throttle);
   const timeScale = useTelemetryStore((s) => s.timeScale);
   const setThrottle = useTelemetryStore((s) => s.setThrottle);
@@ -42,8 +147,25 @@ export function ControlDeck() {
   const applyScenario = useTelemetryStore((s) => s.applyScenario);
   const latest = useTelemetryStore((s) => s.latest);
 
+  const role = useAuthStore((s) => s.role);
+  const demoMode = useAuthStore((s) => s.demoMode);
+  //: Mirrors the backend gate exactly — see app/auth/deps.py::require_demo_mode and
+  //: require_role(ROLE_ADMINISTRATOR) on POST /control/fault and /control/sensor-fault.
+  //: Clearing an active fault stays available to any role; only injection is gated.
+  const canInjectFaults = demoMode && role === "administrator";
+
   const throttleDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [throttleDisplay, setThrottleDisplay] = useState(throttle);
+
+  const [faultDrafts, setFaultDrafts] = useState<
+    Record<string, { pct: number; ramp: number }>
+  >({});
+  function faultDraft(type: string) {
+    return faultDrafts[type] ?? { pct: 50, ramp: DEFAULT_RAMP_SECONDS };
+  }
+  function patchFaultDraft(type: string, patch: Partial<{ pct: number; ramp: number }>) {
+    setFaultDrafts((d) => ({ ...d, [type]: { ...faultDraft(type), ...patch } }));
+  }
 
   function onThrottleChange(value: number) {
     setThrottleDisplay(value);
@@ -63,14 +185,15 @@ export function ControlDeck() {
   );
 
   return (
-    <div className="sticky bottom-0 z-30 border-t border-base-border bg-base-bg/95 backdrop-blur">
-      <div className="mx-auto max-w-[1800px] px-4 py-2 sm:px-6">
+    <div className="sticky bottom-0 z-30 border-t border-base-border bg-base-bg">
+      <div className="page-container py-2">
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="mb-2 flex w-full items-center justify-between text-left"
+          className="mb-2 flex w-full items-center justify-between text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-cyan"
+          aria-expanded={expanded}
         >
           <span className="panel-title">Control Deck</span>
-          <span className="text-[11px] text-slate-500">{expanded ? "Hide ▾" : "Show ▴"}</span>
+          <span className="text-[11px] text-slate-400">{expanded ? "Hide ▾" : "Show ▴"}</span>
         </button>
 
         {expanded && (
@@ -78,7 +201,7 @@ export function ControlDeck() {
             {/* Throttle */}
             <div className="glass-panel p-3">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-[10px] uppercase tracking-wider text-slate-500">Throttle</span>
+                <span className="text-[10px] uppercase tracking-wider text-slate-400">Throttle</span>
                 <span className="tabular text-sm text-status-cyan">{Math.round(throttleDisplay * 100)}%</span>
               </div>
               <input
@@ -94,7 +217,7 @@ export function ControlDeck() {
 
             {/* Time scale */}
             <div className="glass-panel p-3">
-              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
+              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-400">
                 Time Acceleration
               </span>
               <div className="flex gap-2">
@@ -117,7 +240,7 @@ export function ControlDeck() {
 
             {/* Phase jump */}
             <div className="glass-panel p-3">
-              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
+              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-400">
                 Mission Phase
               </span>
               <div className="grid grid-cols-2 gap-2">
@@ -140,32 +263,36 @@ export function ControlDeck() {
 
             {/* Fault injection grid */}
             <div className="glass-panel p-3">
-              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
+              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-400">
                 Fault Injection · engine
               </span>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {!canInjectFaults && (
+                <p className="mb-2 rounded-md border border-base-border/70 bg-base-panel2/40 px-2 py-1.5 text-[10px] text-slate-400">
+                  {!demoMode
+                    ? "Disabled — DEMO_MODE is off (real-deployment posture)."
+                    : "Administrator role required to inject faults."}
+                </p>
+              )}
+              <div className="grid max-h-72 grid-cols-1 gap-1.5 overflow-y-auto pr-1">
                 {FAULT_CATALOG.map((meta) => {
                   const severity = activeFaults.get(meta.type);
-                  const isActive = severity !== undefined;
+                  const draft = faultDraft(meta.type);
                   return (
-                    <button
+                    <FaultInjectRow
                       key={meta.type}
-                      onClick={() =>
-                        isActive ? clearFault(meta.type as FaultType) : injectFault(meta.type as FaultType)
+                      label={meta.label}
+                      description={meta.description}
+                      targetPct={draft.pct}
+                      rampSeconds={draft.ramp}
+                      actualSeverity={severity}
+                      injectDisabled={!canInjectFaults}
+                      onTargetChange={(pct) => patchFaultDraft(meta.type, { pct })}
+                      onRampChange={(ramp) => patchFaultDraft(meta.type, { ramp })}
+                      onInject={() =>
+                        injectFault(meta.type as FaultType, draft.pct / 100, draft.ramp)
                       }
-                      title={meta.description}
-                      className={clsx(
-                        "flex flex-col items-start gap-0.5 rounded-md border px-2 py-1.5 text-left transition-colors",
-                        isActive
-                          ? severityTone(severity)
-                          : "border-base-border text-slate-400 hover:border-status-cyan/30"
-                      )}
-                    >
-                      <span className="font-mono text-[11px] font-medium leading-tight">{meta.label}</span>
-                      <span className="text-[10px] opacity-80">
-                        {isActive ? `${Math.round(severity * 100)}% · tap to clear` : "tap to inject"}
-                      </span>
-                    </button>
+                      onClear={() => clearFault(meta.type as FaultType)}
+                    />
                   );
                 })}
               </div>
@@ -175,7 +302,7 @@ export function ControlDeck() {
                 they are a different kind of thing — these corrupt the *reading*, not the
                 machine, and the whole point of the demo is that the operator can tell. */}
             <div className="glass-panel p-3">
-              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
+              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-400">
                 Sensor Faults · instrumentation only
               </span>
               <div className="grid grid-cols-2 gap-2">
@@ -186,21 +313,24 @@ export function ControlDeck() {
                   // leaving a dangling half-empty row underneath the rest.
                   const isLastOfOddRow =
                     i === SENSOR_FAULT_CATALOG.length - 1 && SENSOR_FAULT_CATALOG.length % 2 === 1;
+                  const disabled = !isActive && !canInjectFaults;
                   return (
                     <button
                       key={meta.type}
+                      disabled={disabled}
                       onClick={() =>
                         isActive
                           ? clearSensorFault(meta.type as SensorFaultType)
                           : injectSensorFault(meta.type as SensorFaultType)
                       }
-                      title={meta.description}
+                      title={disabled ? "Fault injection unavailable (demo mode off, or not signed in as administrator)" : meta.description}
                       className={clsx(
                         "flex flex-col items-start gap-0.5 rounded-md border px-2 py-1.5 text-left transition-colors",
                         isLastOfOddRow && "col-span-2",
                         isActive
                           ? severityTone(severity)
-                          : "border-base-border text-slate-400 hover:border-status-cyan/30"
+                          : "border-base-border text-slate-400 hover:border-status-cyan/30",
+                        disabled && "cursor-not-allowed opacity-30 hover:border-base-border"
                       )}
                     >
                       <span className="font-mono text-[11px] font-medium leading-tight">
@@ -219,7 +349,7 @@ export function ControlDeck() {
 
             {/* Environment */}
             <div className="glass-panel p-3">
-              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-500">
+              <span className="mb-2 block text-[10px] uppercase tracking-wider text-slate-400">
                 Environment
               </span>
               <div className="grid grid-cols-3 gap-2">
@@ -238,7 +368,7 @@ export function ControlDeck() {
                 ))}
               </div>
               {latest?.ambient_temperature_c != null && (
-                <p className="mt-2 tabular text-[10px] text-slate-500">
+                <p className="mt-2 tabular text-[10px] text-slate-400">
                   ambient {latest.ambient_temperature_c.toFixed(1)}°C
                   {latest.injection_timing_deg != null && (
                     <> · timing {latest.injection_timing_deg.toFixed(1)}° BTDC</>

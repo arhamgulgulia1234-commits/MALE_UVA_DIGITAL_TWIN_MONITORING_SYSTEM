@@ -4,10 +4,9 @@ The same socket carries live physics and replayed missions — `app/sim/replay_e
 pushes stored frames through this exact broadcast path, so the frontend needs no
 replay-specific code. Frames carry `is_replay` purely so the UI can show a badge.
 
-Phase 3 adds a bearer-token check on the handshake. Browsers cannot set headers when
+The handshake requires a valid session JWT (any role). Browsers cannot set headers when
 opening a WebSocket, so a `?token=` query parameter is accepted alongside the
-Authorization header; see app/core/security.py for why that is a demo-grade compromise
-and what a real deployment should do instead.
+Authorization header — see app/auth/deps.py::websocket_user.
 """
 from __future__ import annotations
 
@@ -15,7 +14,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
-from app.core.security import auth_enabled, websocket_token_ok
+from app.auth.deps import websocket_user
 from app.core.uav_ids import DEFAULT_UAV_ID
 
 logger = logging.getLogger(__name__)
@@ -106,18 +105,18 @@ fleet_manager = FleetOverviewConnectionManager()
 
 @router.websocket("/ws/telemetry")
 async def ws_telemetry(websocket: WebSocket) -> None:
-    if not websocket_token_ok(
+    user = await websocket_user(
         websocket.headers.get("authorization"),
         websocket.query_params.get("token"),
-    ):
+    )
+    if user is None:
         logger.warning("Rejected telemetry WebSocket: bad or missing token")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     uav_id = websocket.query_params.get("uav_id") or DEFAULT_UAV_ID
     await manager.connect(websocket, uav_id)
-    if auth_enabled():
-        logger.info("Telemetry client authenticated and connected (uav=%s)", uav_id)
+    logger.info("Telemetry client authenticated as %s (uav=%s)", user.username, uav_id)
     try:
         while True:
             # Control happens over REST, so nothing is expected from the client — but we
@@ -131,10 +130,11 @@ async def ws_telemetry(websocket: WebSocket) -> None:
 
 @router.websocket("/ws/fleet-overview")
 async def ws_fleet_overview(websocket: WebSocket) -> None:
-    if not websocket_token_ok(
+    user = await websocket_user(
         websocket.headers.get("authorization"),
         websocket.query_params.get("token"),
-    ):
+    )
+    if user is None:
         logger.warning("Rejected fleet-overview WebSocket: bad or missing token")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return

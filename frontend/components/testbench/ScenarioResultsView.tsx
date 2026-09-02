@@ -68,18 +68,18 @@ const PARAMETER_LABEL: Record<string, string> = {
 };
 
 const TEMP_SERIES: SeriesDef[] = [
-  { key: "egt", color: "#ef4a5f", label: "Max EGT (°C)", yAxisId: "left" },
-  { key: "cht", color: "#f5a623", label: "CHT (°C)", yAxisId: "left" },
+  { key: "egt", color: "#da6978", label: "Max EGT (°C)", yAxisId: "left" },
+  { key: "cht", color: "#d59834", label: "CHT (°C)", yAxisId: "left" },
   { key: "oil_temp", color: "#c084fc", label: "Oil Temp (°C)", yAxisId: "left" },
-  { key: "rpm", color: "#3fd0e0", label: "RPM", yAxisId: "right" },
+  { key: "rpm", color: "#4ab9c6", label: "RPM", yAxisId: "right" },
 ];
 
 const HEALTH_SERIES: SeriesDef[] = [
-  { key: "health", color: "#22d3a8", label: "Overall Health", yAxisId: "left" },
-  { key: "reliability", color: "#3fd0e0", label: "Mission Reliability ×100", yAxisId: "left" },
+  { key: "health", color: "#37af92", label: "Overall Health", yAxisId: "left" },
+  { key: "reliability", color: "#4ab9c6", label: "Mission Reliability ×100", yAxisId: "left" },
   // Phase 5: recovery_reliability, in amber so it reads as its own thing next to
   // mission reliability's cyan rather than a shade of the same series.
-  { key: "recovery", color: "#f5a623", label: "Recovery Reliability ×100", yAxisId: "left" },
+  { key: "recovery", color: "#d59834", label: "Recovery Reliability ×100", yAxisId: "left" },
   { key: "oil_p", color: "#c084fc", label: "Oil Press. (kPa)", yAxisId: "right" },
 ];
 
@@ -87,9 +87,9 @@ const HEALTH_SERIES: SeriesDef[] = [
 const minuteTick = (v: number) => `${v}m`;
 
 function scoreColor(score: number): string {
-  if (score >= 85) return "#22d3a8";
-  if (score >= 60) return "#f5a623";
-  return "#ef4a5f";
+  if (score >= 85) return "#37af92";
+  if (score >= 60) return "#d59834";
+  return "#da6978";
 }
 
 function Stat({
@@ -107,11 +107,11 @@ function Stat({
 }) {
   return (
     <div className="rounded-lg border border-base-border/70 bg-base-panel2/30 px-3 py-2.5">
-      <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
+      <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-400">
         {label}
       </span>
       <MetricValue value={value} unit={unit} size="sm" tone={tone} />
-      {sub && <span className="mt-1 block text-[10px] text-slate-600">{sub}</span>}
+      {sub && <span className="mt-1 block text-[10px] text-slate-400">{sub}</span>}
     </div>
   );
 }
@@ -138,7 +138,7 @@ function ExcursionRow({ excursion }: { excursion: LimitExcursion }) {
         peak {excursion.peak_value}
         {excursion.unit}
       </span>
-      <span className="tabular text-slate-500">
+      <span className="tabular text-slate-400">
         {excursion.duration_min.toFixed(1)} min from T+{excursion.first_at_min.toFixed(1)}
       </span>
     </li>
@@ -159,7 +159,7 @@ export function ScenarioResultsView() {
         glow="none"
         bodyClassName="flex min-h-[320px] items-center justify-center p-6"
       >
-        <p className="max-w-sm text-center text-xs leading-relaxed text-slate-500">
+        <p className="max-w-sm text-center text-xs leading-relaxed text-slate-400">
           {running
             ? "Simulating…"
             : "Set the conditions and throttle profile on the left, then run. The whole scenario is integrated headless through the same physics, digital twin and PHM stack the live dashboard uses — just without a wall clock."}
@@ -185,7 +185,7 @@ export function ScenarioResultsView() {
       >
         <div
           className={clsx(
-            "font-display text-4xl font-bold tracking-[0.12em]",
+            "font-display text-4xl font-bold tracking-[0.07em]",
             style.text,
             summary.verdict !== "PASS" && "animate-pulseGlow"
           )}
@@ -194,7 +194,7 @@ export function ScenarioResultsView() {
         </div>
         <div className="min-w-[240px] flex-1">
           <p className="text-xs leading-relaxed text-slate-300">{summary.headline}</p>
-          <p className="mt-1 text-[10px] text-slate-500">
+          <p className="mt-1 text-[10px] text-slate-400">
             Verdict is taken from the worst point of the run, not the end state ·{" "}
             {result.frame_count} frames · {result.compute_seconds.toFixed(1)} s to compute ·{" "}
             {(result.simulated_seconds / 60).toFixed(0)} simulated minutes
@@ -204,7 +204,7 @@ export function ScenarioResultsView() {
           <StatusPill tone={style.tone}>
             Worst reliability: {summary.worst_recommendation}
           </StatusPill>
-          <span className="text-[10px] text-slate-500">
+          <span className="text-[10px] text-slate-400">
             Ends {summary.final_recommendation}
           </span>
         </div>
@@ -215,7 +215,7 @@ export function ScenarioResultsView() {
           <StatusPill tone={RECOVERY_TONE[summary.worst_recovery_recommendation]}>
             Worst recovery: {summary.worst_recovery_recommendation}
           </StatusPill>
-          <span className="text-[10px] text-slate-500">
+          <span className="text-[10px] text-slate-400">
             Ends {summary.final_recovery_recommendation}
           </span>
         </div>
@@ -228,29 +228,35 @@ export function ScenarioResultsView() {
           glow="none"
           bodyClassName="flex flex-col items-center gap-3 p-4"
         >
-          <RadialGauge value={summary.min_health_score} size={150} strokeWidth={11} color={healthColor}>
+          <RadialGauge
+            value={summary.min_health_score}
+            size={150}
+            strokeWidth={11}
+            color={healthColor}
+            label={`Worst health score reached: ${Math.round(summary.min_health_score)} of 100`}
+          >
             <span className="tabular text-3xl font-bold" style={{ color: healthColor }}>
               {Math.round(summary.min_health_score)}
             </span>
-            <span className="mt-0.5 text-[9px] uppercase tracking-[0.18em] text-slate-500">
+            <span className="mt-0.5 text-[9px] uppercase tracking-[0.1em] text-slate-400">
               Worst
             </span>
           </RadialGauge>
           <div className="w-full space-y-1 text-[11px]">
             <div className="flex justify-between">
-              <span className="text-slate-500">Reached at</span>
+              <span className="text-slate-400">Reached at</span>
               <span className="tabular text-slate-300">
                 T+{summary.min_health_at_min.toFixed(1)} min
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Ends at</span>
+              <span className="text-slate-400">Ends at</span>
               <span className="tabular text-slate-300">
                 {Math.round(summary.final_health_score)}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Worst subsystem</span>
+              <span className="text-slate-400">Worst subsystem</span>
               <span className="text-slate-300 capitalize">{summary.worst_subsystem}</span>
             </div>
           </div>
@@ -379,13 +385,13 @@ export function ScenarioResultsView() {
                 <span className="text-[11px] capitalize text-slate-400">{a.subsystem}</span>
               </div>
               <p className="text-[11px] leading-relaxed text-slate-300">{a.recommendation}</p>
-              <p className="mt-1 text-[10px] text-slate-600">{a.basis.join(" · ")}</p>
+              <p className="mt-1 text-[10px] text-slate-400">{a.basis.join(" · ")}</p>
             </div>
           ))}
         </GlassCard>
       )}
 
-      <ul className="space-y-0.5 px-1 text-[10px] text-slate-600">
+      <ul className="space-y-0.5 px-1 text-[10px] text-slate-400">
         {result.notes.map((n) => (
           <li key={n}>· {n}</li>
         ))}

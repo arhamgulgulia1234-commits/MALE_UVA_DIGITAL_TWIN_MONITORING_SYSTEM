@@ -24,7 +24,7 @@ export function MissionReportView() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
           onClick={clearMissionReport}
         >
           <motion.div
@@ -38,7 +38,7 @@ export function MissionReportView() {
             <div className="flex items-center justify-between border-b border-base-border px-5 py-3">
               <div>
                 <h2 className="panel-title">Mission Report</h2>
-                <p className="mt-0.5 text-[11px] text-slate-500">
+                <p className="mt-0.5 text-[11px] text-slate-400">
                   Mission #{r.mission_id} · {r.profile_name} · {r.duration}
                 </p>
               </div>
@@ -124,7 +124,7 @@ export function MissionReportView() {
                   />
                 </div>
                 {r.phases_flown?.length > 0 && (
-                  <p className="mt-2 font-mono text-[11px] text-slate-500">
+                  <p className="mt-2 font-mono text-[11px] text-slate-400">
                     phases: {r.phases_flown.join(" → ")}
                   </p>
                 )}
@@ -160,7 +160,7 @@ export function MissionReportView() {
                   Fault Events ({r.fault_events?.length ?? 0})
                 </h3>
                 {!r.fault_events?.length ? (
-                  <p className="text-xs text-slate-500">None recorded.</p>
+                  <p className="text-xs text-slate-400">None recorded.</p>
                 ) : (
                   <ul className="flex flex-col gap-1.5">
                     {r.fault_events.map((e: any, i: number) => (
@@ -174,7 +174,7 @@ export function MissionReportView() {
                             sensor
                           </span>
                         )}
-                        <span className="ml-auto tabular text-slate-500">
+                        <span className="ml-auto tabular text-slate-400">
                           T+{e.t_plus}
                         </span>
                         <span
@@ -231,7 +231,7 @@ function fmt(v: number | null | undefined): string {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-base-border bg-base-panel2/50 px-3 py-2">
-      <div className="text-[9px] uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="text-[9px] uppercase tracking-wider text-slate-400">{label}</div>
       <div className="tabular mt-0.5 text-sm font-semibold text-slate-100">{value}</div>
     </div>
   );

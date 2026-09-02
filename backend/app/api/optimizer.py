@@ -24,10 +24,10 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 
+from app.auth.deps import get_current_user
 from app.core.compute_budget import heavy_compute_slot
 from app.core.engine_params import PARAMS
 from app.core.models import OperatingPointRequest
-from app.core.security import require_token
 from app.core.uav_ids import DEFAULT_UAV_ID
 from app.ml.operating_point_optimizer import (
     OBJECTIVE_LABELS,
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/optimize", tags=["test-bench"])
 
 
-@router.post("/operating-point", dependencies=[Depends(require_token)])
+@router.post("/operating-point", dependencies=[Depends(get_current_user)])
 async def optimize_point(
     req: OperatingPointRequest, request: Request, uav_id: str = DEFAULT_UAV_ID
 ) -> dict:

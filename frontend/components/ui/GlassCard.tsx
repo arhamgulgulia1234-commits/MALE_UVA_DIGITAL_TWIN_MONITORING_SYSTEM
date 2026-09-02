@@ -36,7 +36,7 @@ export function GlassCard({
         <div className="flex items-center justify-between gap-3 border-b border-base-border/70 px-4 py-3">
           <div>
             {title && <h2 className="panel-title">{title}</h2>}
-            {subtitle && <p className="mt-0.5 text-[11px] text-slate-500">{subtitle}</p>}
+            {subtitle && <p className="mt-0.5 text-[11px] text-slate-400">{subtitle}</p>}
           </div>
           {headerRight}
         </div>

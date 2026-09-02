@@ -25,7 +25,7 @@ function Delta({ label, value, suffix = "%" }: { label: string; value: number; s
   const negative = value < -0.05;
   return (
     <div className="flex items-baseline justify-between text-[11px]">
-      <span className="text-slate-500">{label}</span>
+      <span className="text-slate-400">{label}</span>
       <span
         className={clsx(
           "tabular font-medium",
@@ -63,10 +63,10 @@ function Card({
     >
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h3 className="font-display text-sm font-bold uppercase tracking-[0.14em] text-status-cyan">
+          <h3 className="font-display text-sm font-bold uppercase tracking-[0.08em] text-status-cyan">
             {card.label}
           </h3>
-          <p className="mt-0.5 text-[10px] text-slate-500">
+          <p className="mt-0.5 text-[10px] text-slate-400">
             at {card.reference_conditions.altitude_m} m ·{" "}
             {card.reference_conditions.ambient_temperature_c} °C
           </p>
@@ -78,12 +78,12 @@ function Card({
 
       <div className="rounded-md border border-base-border/70 bg-base-panel2/40 px-2.5 py-2">
         <div className="flex items-baseline justify-between">
-          <span className="text-[10px] uppercase tracking-wider text-slate-500">Setpoint</span>
+          <span className="text-[10px] uppercase tracking-wider text-slate-400">Setpoint</span>
           <span className="tabular text-sm font-semibold text-slate-100">
             {card.setpoint.throttle_pct.toFixed(0)}%
           </span>
         </div>
-        <div className="mt-1 flex gap-3 text-[10px] text-slate-500">
+        <div className="mt-1 flex gap-3 text-[10px] text-slate-400">
           <span className="tabular">
             AFR {card.setpoint.afr_trim >= 0 ? "+" : ""}
             {card.setpoint.afr_trim.toFixed(2)}
@@ -102,24 +102,24 @@ function Card({
       </div>
 
       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 border-t border-base-border/70 pt-2 text-[10px]">
-        <span className="text-slate-500">
+        <span className="text-slate-400">
           Power <span className="tabular text-slate-300">{card.predicted.power_kw.toFixed(1)} kW</span>
         </span>
-        <span className="text-slate-500">
+        <span className="text-slate-400">
           BSFC{" "}
           <span className="tabular text-slate-300">
             {card.predicted.bsfc_g_per_kwh?.toFixed(0) ?? "—"} g/kWh
           </span>
         </span>
-        <span className="text-slate-500">
+        <span className="text-slate-400">
           CHT <span className="tabular text-slate-300">{card.predicted.cht_c.toFixed(0)} °C</span>
         </span>
-        <span className="text-slate-500">
+        <span className="text-slate-400">
           EGT <span className="tabular text-slate-300">{card.predicted.egt_max_c.toFixed(0)} °C</span>
         </span>
       </div>
 
-      <p className="text-[10px] italic leading-relaxed text-slate-600">{card.trade_off}</p>
+      <p className="text-[10px] italic leading-relaxed text-slate-400">{card.trade_off}</p>
 
       <button
         type="button"
@@ -130,7 +130,7 @@ function Card({
         className={clsx(
           "mt-auto rounded-md border px-3 py-2 font-mono text-[11px] uppercase tracking-wider transition-colors",
           disabled
-            ? "cursor-not-allowed border-base-border bg-base-panel2/40 text-slate-600"
+            ? "cursor-not-allowed border-base-border bg-base-panel2/40 text-slate-400"
             : applied
             ? "border-status-go/50 bg-status-go/15 text-status-go"
             : "border-status-cyan/50 bg-status-cyan/10 text-status-cyan hover:bg-status-cyan/20"
@@ -181,7 +181,7 @@ export function MissionPresetCards() {
       {!missionActive && (
         <p
           id="preset-disabled-hint"
-          className="rounded-md border border-base-border/70 bg-base-panel2/40 px-3 py-2 text-[11px] text-slate-500"
+          className="rounded-md border border-base-border/70 bg-base-panel2/40 px-3 py-2 text-[11px] text-slate-400"
         >
           {MISSION_REQUIRED_HINT}
         </p>
@@ -199,7 +199,7 @@ export function MissionPresetCards() {
       )}
 
       {loading && presets.length === 0 && (
-        <p className="py-8 text-center text-xs text-slate-500">
+        <p className="py-8 text-center text-xs text-slate-400">
           Resolving presets — each one is a full optimizer search at reference conditions…
         </p>
       )}

@@ -54,13 +54,13 @@ export function FleetTrendMiniCharts() {
         return (
           <GlassCard key={uavId} title={`${uavId} — Health Trend`} glow="none" bodyClassName="p-3">
             {!trend || trend.points.length === 0 ? (
-              <p className="py-6 text-center text-[11px] text-slate-500">
+              <p className="py-6 text-center text-[11px] text-slate-400">
                 {trend ? "No completed missions yet" : "Loading…"}
               </p>
             ) : (
               <MultiLineChart
                 data={trend.points}
-                series={[{ key: "health", color: "#3fd0e0", label: "Health score" }]}
+                series={[{ key: "health", color: "#4ab9c6", label: "Health score" }]}
                 xKey="mission"
                 xTickFormatter={(v) => `#${v}`}
                 height={110}

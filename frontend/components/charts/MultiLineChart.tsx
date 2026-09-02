@@ -33,7 +33,7 @@ interface MultiLineChartProps {
 function ChartTooltip({ active, payload, series }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-lg border border-base-border bg-base-panel2/95 px-3 py-2 text-[11px] shadow-glow backdrop-blur">
+    <div className="rounded-lg border border-base-border bg-base-panel2 px-3 py-2 text-[11px] shadow-glow">
       {payload.map((p: any) => {
         const def = series.find((s: SeriesDef) => s.key === p.dataKey);
         return (

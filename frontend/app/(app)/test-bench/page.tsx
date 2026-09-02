@@ -12,7 +12,6 @@
  * hypothetical one, and getting that wrong in front of an evaluator would be worse than
  * not having the feature.
  */
-import { ModeNav } from "@/components/nav/ModeNav";
 import { useFleetStore } from "@/lib/fleet/store";
 import { UAV_IDS } from "@/lib/fleet/types";
 import { MissionPresetCards } from "@/components/testbench/MissionPresetCards";
@@ -26,18 +25,18 @@ export default function TestBenchPage() {
   const setSelectedUavId = useFleetStore((s) => s.setSelectedUavId);
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <>
       {/* Distinct header treatment from the live dashboard's cyan: amber hazard striping,
           so the two modes are never confused at a glance. */}
-      <header className="sticky top-0 z-30 border-b border-status-amber/40 bg-base-bg/95 backdrop-blur">
+      <header className="border-b border-status-amber/40 bg-base-bg">
         <div
           className="h-1 w-full"
           style={{
             backgroundImage:
-              "repeating-linear-gradient(45deg, rgba(245,166,35,0.65) 0 10px, transparent 10px 20px)",
+              "repeating-linear-gradient(45deg, rgba(213,152,52,0.65) 0 10px, transparent 10px 20px)",
           }}
         />
-        <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
+        <div className="page-container flex flex-wrap items-center gap-4 py-3">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-status-amber/40 bg-status-amber/10">
               <span className="font-display text-sm font-bold text-status-amber">TB</span>
@@ -46,7 +45,7 @@ export default function TestBenchPage() {
               <h1 className="font-display text-base font-bold tracking-wide text-slate-100 sm:text-lg">
                 Test Bench
               </h1>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] text-slate-400">
                 What-if scenarios &amp; operating-point optimisation
               </p>
             </div>
@@ -56,11 +55,11 @@ export default function TestBenchPage() {
               Dashboard — the optimizer's "use current engine health", "apply preset"
               and the live map marker below all act on whichever UAV this picks. */}
           <label className="ml-auto flex items-center gap-1.5 text-[11px] lg:ml-0">
-            <span className="uppercase tracking-wider text-slate-500">UAV</span>
+            <span className="uppercase tracking-wider text-slate-400">UAV</span>
             <select
               value={selectedUavId}
               onChange={(e) => setSelectedUavId(e.target.value)}
-              className="rounded-md border border-base-border bg-base-panel px-2 py-1 font-display text-xs font-semibold text-slate-200 outline-none focus:border-status-amber/60"
+              className="rounded-md border border-base-border bg-base-panel px-2 py-1 font-display text-xs font-semibold text-slate-200 outline-none focus:border-status-amber/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-status-amber"
             >
               {UAV_IDS.map((id) => (
                 <option key={id} value={id}>
@@ -70,17 +69,15 @@ export default function TestBenchPage() {
             </select>
           </label>
 
-          <ModeNav />
-
           <div className="w-full rounded-md border border-status-amber/50 bg-status-amber/10 px-3 py-1.5 text-center lg:w-auto">
-            <span className="animate-pulseGlow font-display text-xs font-bold uppercase tracking-[0.22em] text-status-amber">
+            <span className="font-display text-xs font-bold uppercase tracking-[0.12em] text-status-amber">
               ⚠ Simulation — Not Live Data
             </span>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1800px] flex-1 space-y-6 px-4 py-6 sm:px-6">
+      <main className="page-container flex-1 space-y-6 py-6">
         <MissionPresetCards />
 
         <OptimizerPanel />
@@ -94,11 +91,11 @@ export default function TestBenchPage() {
         </section>
       </main>
 
-      <footer className="border-t border-status-amber/30 bg-base-bg/95 px-4 py-3 text-center sm:px-6">
-        <p className="text-[10px] uppercase tracking-[0.2em] text-status-amber/70">
+      <footer className="border-t border-status-amber/30 bg-base-bg py-3 text-center">
+        <p className="text-[10px] uppercase tracking-[0.11em] text-status-amber/90">
           Every number on this page is simulated · nothing here is recorded as a flight
         </p>
       </footer>
-    </div>
+    </>
   );
 }

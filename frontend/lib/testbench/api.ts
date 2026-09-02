@@ -8,6 +8,7 @@
  * conditions fell outside modelled validity. Losing that would leave the panel silently
  * empty with no way to tell a rejected request from a slow one.
  */
+import { getAuthToken } from "../auth/store";
 import { useFleetStore } from "../fleet/store";
 import type {
   LiveOperatingPoint,
@@ -37,12 +38,11 @@ function resolveApiUrl(): string {
 
 export const API_URL = resolveApiUrl();
 
-const AUTH_TOKEN = process.env.NEXT_PUBLIC_TELEMETRY_TOKEN ?? "";
-
 function headers(): Record<string, string> {
+  const token = getAuthToken();
   return {
     "Content-Type": "application/json",
-    ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 

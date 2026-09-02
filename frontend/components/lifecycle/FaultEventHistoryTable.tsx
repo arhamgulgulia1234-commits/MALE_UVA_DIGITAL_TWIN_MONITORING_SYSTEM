@@ -55,8 +55,8 @@ export function FaultEventHistoryTable() {
     >
       <div className="max-h-[280px] overflow-y-auto">
         <table className="w-full border-collapse text-xs">
-          <thead className="sticky top-0 bg-base-panel/95 backdrop-blur">
-            <tr className="border-b border-base-border/70 text-[10px] uppercase tracking-wider text-slate-500">
+          <thead className="sticky top-0 bg-base-panel">
+            <tr className="border-b border-base-border/70 text-[10px] uppercase tracking-wider text-slate-400">
               <th className="px-3 py-2 text-left font-medium">Fault type</th>
               <th className="px-3 py-2 text-right font-medium">Missions active in</th>
             </tr>
@@ -64,7 +64,7 @@ export function FaultEventHistoryTable() {
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={2} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={2} className="px-3 py-8 text-center text-slate-400">
                   {loading ? "Loading…" : "No data yet."}
                 </td>
               </tr>
@@ -79,7 +79,7 @@ export function FaultEventHistoryTable() {
                 <td
                   className={clsx(
                     "tabular px-3 py-1.5 text-right font-medium",
-                    count > 0 ? "text-status-amber" : "text-slate-600"
+                    count > 0 ? "text-status-amber" : "text-slate-400"
                   )}
                 >
                   {count}
@@ -91,13 +91,13 @@ export function FaultEventHistoryTable() {
       </div>
 
       <div className="border-t border-base-border/70 px-3 py-2">
-        <span className="text-[10px] uppercase tracking-wider text-slate-500">
+        <span className="text-[10px] uppercase tracking-wider text-slate-400">
           Maintenance log
         </span>
       </div>
       <div className="max-h-[200px] overflow-y-auto px-3 pb-3">
         {actions.length === 0 ? (
-          <p className="py-4 text-center text-[11px] text-slate-500">
+          <p className="py-4 text-center text-[11px] text-slate-400">
             No maintenance actions recorded.
           </p>
         ) : (
@@ -112,8 +112,8 @@ export function FaultEventHistoryTable() {
                       −{(a.wear_reset_amount * 100).toFixed(0)}%
                     </span>
                   </div>
-                  <p className="mt-0.5 text-[11px] text-slate-500">{a.description}</p>
-                  <span className="mt-0.5 block text-[10px] text-slate-600">
+                  <p className="mt-0.5 text-[11px] text-slate-400">{a.description}</p>
+                  <span className="mt-0.5 block text-[10px] text-slate-400">
                     {formatWhen(a.performed_at)}
                   </span>
                 </li>
