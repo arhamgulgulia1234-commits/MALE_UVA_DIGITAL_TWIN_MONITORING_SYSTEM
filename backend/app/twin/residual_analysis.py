@@ -424,16 +424,37 @@ class PreAlertMonitor:
             c: deque() for c in CHANNELS
         }
         self._elapsed_s = 0.0
+        #: The last report `update(evaluate=True)` produced, re-served unchanged while
+        #: evaluation is being paced (see `update`'s `evaluate` argument).
+        self._last_report = PreAlertReport(
+            states={c: PreAlertResult(level="none") for c in CHANNELS}
+        )
 
     def reset(self) -> None:
         self._history = {c: deque() for c in CHANNELS}
         self._elapsed_s = 0.0
+        self._last_report = PreAlertReport(
+            states={c: PreAlertResult(level="none") for c in CHANNELS}
+        )
 
     def _floor(self, channel: str) -> float:
         scale = CHANNEL_SCALES.get(channel, 1.0)
         return (scale * self.variance_floor_fraction) ** 2
 
-    def update(self, residuals: dict[str, float], dt_s: float = 0.1) -> PreAlertReport:
+    def update(
+        self, residuals: dict[str, float], dt_s: float = 0.1, evaluate: bool = True
+    ) -> PreAlertReport:
+        """Record this tick's residuals and (by default) re-run both tests.
+
+        `evaluate=False` records the sample and prunes the window exactly as usual but
+        re-serves the previous report instead of re-running `pre_alert_check`. That call
+        is O(window) per channel — at 10 Hz on a 195 s window it re-scans ~1 950 samples
+        per channel per tick — and both tests are statistics over tens of seconds, so
+        evaluating them ten times a second cannot surface anything a once-a-second
+        evaluation misses. The recorded history is identical either way, so an evaluation
+        that does run sees exactly the data it would have seen before. Paced by
+        `settings.phm_analysis_interval_s`; the caller decides, this class only obeys.
+        """
         self._elapsed_s += dt_s
         total_window = self.short_window_s + self.baseline_window_s
         warmed = self._elapsed_s >= self.warmup_s
@@ -444,6 +465,8 @@ class PreAlertMonitor:
             hist.append((self._elapsed_s, x))
             while hist and self._elapsed_s - hist[0][0] > total_window:
                 hist.popleft()
+            if not evaluate:
+                continue
             result = pre_alert_check(
                 hist,
                 short_window_s=self.short_window_s,
@@ -469,4 +492,7 @@ class PreAlertMonitor:
                     trend_triggered=result.trend_triggered,
                 )
             states[channel] = result
-        return PreAlertReport(states=states)
+        if not evaluate:
+            return self._last_report
+        self._last_report = PreAlertReport(states=states)
+        return self._last_report

@@ -187,6 +187,14 @@ class SimulationLoop:
         self._latest: TelemetryFrame | None = None
         self.diagnostics = DiagnosticSnapshot()
 
+        #: Simulated-time bookkeeping for `_phm_analysis_due()`. Every tick still runs
+        #: the physics, the twin, the residual/anomaly EWMAs and assembles a full
+        #: TelemetryFrame; these hold the slow-window analytics' last answers between
+        #: their (less frequent) re-evaluations.
+        self._phm_next_eval_s: float = 0.0
+        self._cached_warning_estimates: dict = {}
+        self._cached_diagnosis: Diagnosis | None = None
+
         self.plant.reset(self.mission.altitude_m)
         self.twin.reset(self.mission.altitude_m)
 
@@ -340,6 +348,34 @@ class SimulationLoop:
         applied = apply_scenario(self, scenario)
         return applied
 
+    # ---- PHM pacing ----------------------------------------------------------
+
+    def _phm_analysis_due(self) -> bool:
+        """True when the slow-window PHM analytics should be re-evaluated this tick.
+
+        Three of them — the pre-alert variance/trend tests, the RUL trend fit and the
+        random-forest classifier — recompute from scratch over windows measured in tens
+        to hundreds of *simulated* seconds. Running them at the full 10 Hz tick rate was
+        ~90% of this loop's CPU in steady state (once those windows had filled), for
+        answers that by construction cannot change meaningfully within one 100 ms tick.
+        Everything on the live telemetry path — physics, twin, residuals, anomaly scores,
+        fusion, the frame itself — is untouched by this and still runs every tick; these
+        three simply publish a value that is refreshed every
+        `settings.phm_analysis_interval_s` simulated seconds and held in between.
+
+        Gating on simulated time rather than on a tick count keeps the number of
+        refreshes *per analysis window* the same at every `time_scale`: at 10x a single
+        tick already advances 1 s of simulated time, so every tick evaluates and the
+        behaviour is identical to the unpaced version. An interval of 0 disables the
+        pacing entirely.
+        """
+        if settings.phm_analysis_interval_s <= 0.0:
+            return True
+        if self.sim_time_s < self._phm_next_eval_s:
+            return False
+        self._phm_next_eval_s = self.sim_time_s + settings.phm_analysis_interval_s
+        return True
+
     # ---- main tick -----------------------------------------------------------
 
     def tick(self, wall_dt_s: float) -> TelemetryFrame:
@@ -430,9 +466,16 @@ class SimulationLoop:
         # consumed, handed to the earlier, softer pre-alert tier — see
         # app/twin/residual_analysis.py. Deliberately computed alongside, not instead of,
         # the existing z-score gate below; neither monitor's state feeds the other.
-        pre_alert_report = self.pre_alert.update(comparison.residuals, dt_s=sim_dt_total)
+        # `phm_due` paces only the three slow-window analyses below — see
+        # `_phm_analysis_due()`. Their inputs are still recorded every tick.
+        phm_due = self._phm_analysis_due()
+        pre_alert_report = self.pre_alert.update(
+            comparison.residuals, dt_s=sim_dt_total, evaluate=phm_due
+        )
         anomaly: AnomalyReport = self.anomaly.update(report, dt_s=sim_dt_total)
-        rul_estimate = self.rul.update(self.sim_time_s, anomaly.health_indicators)
+        rul_estimate = self.rul.update(
+            self.sim_time_s, anomaly.health_indicators, evaluate=phm_due
+        )
         reliability = self.reliability.evaluate(
             rul_minutes=rul_estimate.minutes,
             mission_remaining_s=self.mission.remaining_seconds(),
@@ -457,16 +500,25 @@ class SimulationLoop:
             )
             for subsystem, channels in SUBSYSTEM_CHANNELS.items()
         }
-        warning_estimates = self.rul.update_early_warnings(
-            self.sim_time_s, subsystem_pre_alert_levels
-        )
+        if phm_due:
+            # Another whole-window least-squares fit per gated subsystem, and it reads
+            # the pre-alert levels held above — so it is refreshed on exactly the ticks
+            # those are, never against a stale gate.
+            self._cached_warning_estimates = self.rul.update_early_warnings(
+                self.sim_time_s, subsystem_pre_alert_levels
+            )
+        warning_estimates = self._cached_warning_estimates
 
         residual_z = {c: report.z(c) for c in report.stats}
-        diagnosis: Diagnosis = self.classifier.predict(
-            self.residuals.feature_vector() + self.fusion_stats.feature_vector(),
-            residual_z=residual_z,
-            fusion_z=fusion_z,
-        )
+        if phm_due or self._cached_diagnosis is None:
+            # A random-forest `predict_proba` — hundreds of tree traversals — over
+            # features that are themselves EWMAs with multi-second time constants.
+            self._cached_diagnosis = self.classifier.predict(
+                self.residuals.feature_vector() + self.fusion_stats.feature_vector(),
+                residual_z=residual_z,
+                fusion_z=fusion_z,
+            )
+        diagnosis: Diagnosis = self._cached_diagnosis
 
         efficiency = self.efficiency.update(
             fuel_flow_lph=real_state.fuel_flow_lph,
@@ -699,9 +751,20 @@ async def run_simulation(app) -> None:
 
     fleet: FleetRegistry = app.state.fleet
     last = time.perf_counter()
+    #: Absolute deadline for the next tick, so the period is `tick_seconds` rather than
+    #: `tick_seconds + however long the tick itself took`. Sleeping a flat interval made
+    #: the achieved rate sag below the configured one in proportion to the work per tick
+    #: — measured at 7.5-7.9 Hz against a configured 10 Hz. The physics is unaffected
+    #: either way (it integrates the *measured* `wall_dt`, not an assumed one), but the
+    #: dashboard's frame rate is not, and "10 Hz" should mean 10 Hz.
+    next_tick = last + settings.tick_seconds
     while True:
-        await asyncio.sleep(settings.tick_seconds)
+        await asyncio.sleep(max(0.0, next_tick - time.perf_counter()))
         now = time.perf_counter()
+        # Skip missed deadlines outright rather than bursting to catch up: a backlog of
+        # ticks would be replayed as fast as the loop could run them, which is the one
+        # thing a real-time twin must never do.
+        next_tick = max(now, next_tick + settings.tick_seconds)
         wall_dt = now - last
         last = now
 

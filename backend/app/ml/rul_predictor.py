@@ -122,6 +122,9 @@ class RULPredictor:
         #: subsystem can be gated into early warning at once.
         self._warning_smoothed: dict[str, float] = {}
         self._warning_last_time_s: float | None = None
+        #: The last estimate `update(evaluate=True)` produced, re-served unchanged while
+        #: evaluation is being paced — see `update`'s `evaluate` argument.
+        self._last_estimate = RULEstimate(None, None, "stable", 0.0)
 
     def reset(self) -> None:
         self._history.clear()
@@ -129,13 +132,33 @@ class RULPredictor:
         self._last_time_s = None
         self._warning_smoothed.clear()
         self._warning_last_time_s = None
+        self._last_estimate = RULEstimate(None, None, "stable", 0.0)
 
-    def update(self, sim_time_s: float, health_indicators: dict[str, float]) -> RULEstimate:
+    def update(
+        self,
+        sim_time_s: float,
+        health_indicators: dict[str, float],
+        evaluate: bool = True,
+    ) -> RULEstimate:
+        """Record this tick's health indicators and (by default) refit the trend.
+
+        `evaluate=False` records the sample and prunes the window as usual but re-serves
+        the previous estimate instead of refitting. `_estimate_for` is a least-squares fit
+        over the *whole* window, run once per subsystem — at 10 Hz on a 5 minute window
+        that is six fits over ~3 000 samples every 100 ms, to extrapolate a trend measured
+        in minutes. The smoothing EMA below is anchored to elapsed time rather than to a
+        tick count (`alpha = 1 - exp(-dt/tau)`, with `dt` taken from `sim_time_s`), so a
+        held tick does not distort it: the next evaluation simply advances the filter by
+        the full interval. Paced by `settings.phm_analysis_interval_s`.
+        """
         for subsystem, hi in health_indicators.items():
             hist = self._history.setdefault(subsystem, deque())
             hist.append((sim_time_s, hi))
             while hist and sim_time_s - hist[0][0] > self.window_s:
                 hist.popleft()
+
+        if not evaluate:
+            return self._last_estimate
 
         best: RULEstimate | None = None
         for subsystem, hist in self._history.items():
@@ -164,7 +187,8 @@ class RULPredictor:
             # resumes from here instead of jumping straight to a freshly-computed raw
             # estimate. That seed-from-raw jump is what used to make the readout snap the
             # instant the minimum-samples gate opened.
-            return RULEstimate(None, None, "stable", 0.0)
+            self._last_estimate = RULEstimate(None, None, "stable", 0.0)
+            return self._last_estimate
 
         # Smooth the reported figure. The underlying least-squares fit is jumpy while a
         # fault is still ramping, and an RUL readout that leaps between 25 and 600 minutes
@@ -178,12 +202,13 @@ class RULPredictor:
         alpha = 1.0 - math.exp(-dt_s / max(1e-6, tau))
         self._smoothed += (raw - self._smoothed) * alpha
 
-        return RULEstimate(
+        self._last_estimate = RULEstimate(
             minutes=max(0.0, self._smoothed),
             subsystem=best.subsystem,
             model=best.model,
             slope_per_min=best.slope_per_min,
         )
+        return self._last_estimate
 
     def _estimate_for(
         self,
